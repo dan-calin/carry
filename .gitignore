@@ -3,6 +3,7 @@
 .agents/
 .carry/
 .shared-memory/
+.seo-cache/
 dist/
 node_modules/
 .wrangler/
