@@ -1,5 +1,9 @@
 # Carry
 
+<p align="center">
+  <img src="docs/assets/carry-banner.svg" alt="Carry project sync app showing two trusted devices ready for smart sync" width="100%">
+</p>
+
 **Move a project between your Windows PC and laptop without putting the folder
 in a cloud drive.**
 
