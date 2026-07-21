@@ -60,5 +60,8 @@
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4",
     "wrangler": "4.112.0"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
   }
 }
