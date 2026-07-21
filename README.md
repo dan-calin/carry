@@ -1,15 +1,15 @@
-# Carry
+# Carry — Project Sync for Windows
 
 <p align="center">
   <img src="docs/assets/carry-banner.svg" alt="Carry project sync app showing two trusted devices ready for smart sync" width="100%">
 </p>
 
-**Move a project between your Windows PC and laptop without putting the folder
-in a cloud drive.**
+**Carry is an open-source Windows desktop app for syncing project folders and
+shared AI-agent memory between trusted computers.**
 
-Carry keeps two trusted copies of a project in sync. It can also carry shared
-AI-agent memory with the project, so useful context is available on both
-machines.
+Move your work between a PC and laptop without putting the entire project in a
+cloud drive. Carry keeps both trusted copies in sync, including the useful
+context your AI coding agents share.
 
 > **Public preview:** Carry is ready for testing and feedback, but it is not a
 > finished commercial product. Start with a test folder before trusting it with
