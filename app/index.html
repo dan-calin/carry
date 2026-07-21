@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#20242b">
+  <meta name="description" content="Carry securely syncs a project folder and shared agent memory between trusted devices.">
+  <title>Carry</title>
+  <link rel="icon" href="/assets/carry-icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/carry-icon-44.png" type="image/png" sizes="44x44">
+  <link rel="apple-touch-icon" href="/assets/carry-icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="app-shell" id="app-shell" aria-busy="true">
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="brand" aria-label="Carry" data-tauri-drag-region>
+        <img class="brand-mark" src="/assets/carry-icon.svg" width="29" height="29" alt="">
+        <span class="brand-name">Carry</span>
+      </div>
+      <button class="folder-switcher" id="folder-switcher" type="button" title="Choose another folder">
+        <span class="fluent-icon" aria-hidden="true">&#xE8B7;</span>
+        <span class="folder-switcher-copy">
+          <span class="folder-switcher-name" id="folder-name">No folder selected</span>
+          <span class="folder-switcher-path" id="folder-path">Choose a folder to begin</span>
+        </span>
+        <span class="fluent-icon folder-chevron" aria-hidden="true">&#xE70D;</span>
+      </button>
+      <div class="titlebar-spacer" data-tauri-drag-region></div>
+      <div class="privacy-state" title="Carry's app server is available only on this PC">
+        <span class="privacy-lock fluent-icon" aria-hidden="true">&#xE72E;</span>
+        <span>Local and encrypted</span>
+      </div>
+      <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh" title="Refresh">
+        <span class="fluent-icon" aria-hidden="true">&#xE72C;</span>
+      </button>
+      <button class="icon-button" id="theme-button" type="button" aria-label="Change color theme" title="Change color theme">
+        <span class="fluent-icon" id="theme-icon" aria-hidden="true">&#xE706;</span>
+      </button>
+      <div class="window-controls" id="window-controls" aria-label="Window controls">
+        <button class="window-control" type="button" data-window-action="minimize" aria-label="Minimize" title="Minimize">
+          <span class="fluent-icon" aria-hidden="true">&#xE921;</span>
+        </button>
+        <button class="window-control" type="button" data-window-action="maximize" aria-label="Maximize" title="Maximize">
+          <span class="fluent-icon" id="maximize-icon" aria-hidden="true">&#xE922;</span>
+        </button>
+        <button class="window-control window-control-close" type="button" data-window-action="close" aria-label="Close" title="Close">
+          <span class="fluent-icon" aria-hidden="true">&#xE8BB;</span>
+        </button>
+      </div>
+    </header>
+
+    <aside class="sidebar" aria-label="Primary navigation">
+      <nav class="nav-list">
+        <button class="nav-item is-active" type="button" data-view="overview" aria-label="Overview" aria-current="page" title="Overview">
+          <span class="fluent-icon" aria-hidden="true">&#xE80F;</span><span>Overview</span>
+        </button>
+        <button class="nav-item" type="button" data-view="activity" aria-label="Activity" title="Activity">
+          <span class="fluent-icon" aria-hidden="true">&#xE81C;</span><span>Activity</span>
+          <span class="nav-count" id="activity-count" hidden>0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="checkpoints" aria-label="Checkpoints" title="Checkpoints">
+          <span class="fluent-icon" aria-hidden="true">&#xE823;</span><span>Checkpoints</span>
+          <span class="nav-count" id="checkpoint-count" hidden>0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="conflicts" aria-label="Conflicts" title="Conflicts">
+          <span class="fluent-icon" aria-hidden="true">&#xE7BA;</span><span>Conflicts</span>
+          <span class="nav-count nav-count-danger" id="conflict-count" hidden>0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="devices" aria-label="Devices" title="Devices">
+          <span class="fluent-icon" aria-hidden="true">&#xE772;</span><span>Devices</span>
+          <span class="nav-count" id="device-count" hidden>0</span>
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="device-identity" id="device-identity">
+          <span class="device-glyph fluent-icon" aria-hidden="true">&#xE7F4;</span>
+          <span class="device-identity-copy">
+            <span class="device-label">This device</span>
+            <span class="device-id">Not initialized</span>
+          </span>
+        </div>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="workspace-header">
+        <div>
+          <h1 id="view-title">Overview</h1>
+          <p id="view-subtitle">Your folder, devices, and recent sync activity.</p>
+        </div>
+        <div class="workspace-actions" id="workspace-actions"></div>
+      </header>
+      <div class="workspace-body">
+        <main class="main-content" id="main-content">
+          <div class="skeleton-layout" aria-label="Loading Carry">
+            <div class="skeleton skeleton-wide"></div>
+            <div class="skeleton skeleton-line"></div>
+            <div class="skeleton skeleton-line short"></div>
+            <div class="skeleton skeleton-panel"></div>
+          </div>
+        </main>
+        <aside class="inspector" id="inspector" aria-label="Details">
+          <div class="inspector-empty">
+            <span class="fluent-icon" aria-hidden="true">&#xE946;</span>
+            <p>Select an activity item to inspect it.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="job-tray" id="job-tray" aria-live="polite" hidden></section>
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </div>
+
+  <dialog class="modal sync-modal" id="sync-dialog" aria-labelledby="sync-title">
+    <form id="sync-form">
+      <div class="modal-header">
+        <div>
+          <h2 id="sync-title">Choose how to sync</h2>
+          <p>Select the other device and which folder should be treated as the source for this exchange.</p>
+        </div>
+        <button class="icon-button modal-close" type="button" data-close-dialog="sync-dialog" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+
+      <label class="field-label" for="sync-device">Sync with</label>
+      <select class="select-input sync-device-select" id="sync-device" required></select>
+
+      <fieldset class="sync-direction-fieldset">
+        <legend>Direction</legend>
+        <label class="sync-direction-choice">
+          <input type="radio" name="sync-direction" value="pull">
+          <span class="sync-direction-icon pull fluent-icon" aria-hidden="true">&#xE896;</span>
+          <span><strong id="sync-pull-title">Pull from device</strong><small id="sync-pull-copy">Make this folder match the selected device.</small></span>
+        </label>
+        <label class="sync-direction-choice">
+          <input type="radio" name="sync-direction" value="push">
+          <span class="sync-direction-icon push fluent-icon" aria-hidden="true">&#xE898;</span>
+          <span><strong id="sync-push-title">Push to device</strong><small id="sync-push-copy">Make the selected device match this folder.</small></span>
+        </label>
+        <label class="sync-direction-choice">
+          <input type="radio" name="sync-direction" value="smart" checked>
+          <span class="sync-direction-icon smart fluent-icon" aria-hidden="true">&#xE895;</span>
+          <span><strong>Smart sync</strong><small>Exchange one-sided changes and stop for genuine conflicts.</small></span>
+        </label>
+      </fieldset>
+
+      <div class="sync-direction-note" id="sync-direction-note">
+        <span class="fluent-icon" aria-hidden="true">&#xE946;</span>
+        <span>Smart sync compares both folders with their last successful sync.</span>
+      </div>
+      <label class="sync-direct-choice" id="sync-direct-choice" hidden>
+        <input type="checkbox" id="sync-direct">
+        <span class="sync-direct-icon fluent-icon" aria-hidden="true">&#xE774;</span>
+        <span class="sync-direct-copy">
+          <span><strong>Try a direct device-to-device connection</strong><em>Experimental</em></span>
+          <small>Carry will attempt an encrypted direct transfer and fall back to the secure relay automatically. Direct mode lets the paired device see your network address.</small>
+        </span>
+      </label>
+      <div class="modal-actions">
+        <button class="button button-quiet" type="button" data-close-dialog="sync-dialog">Cancel</button>
+        <button class="button button-primary" type="submit" id="sync-start-button"><span class="fluent-icon" aria-hidden="true">&#xE895;</span>Start sync</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="checkpoint-dialog" aria-labelledby="checkpoint-title">
+    <form id="checkpoint-form">
+      <div class="modal-header">
+        <div>
+          <h2 id="checkpoint-title">Create checkpoint</h2>
+          <p>Save the folder exactly as it is now. Unchanged file data is reused to save space.</p>
+        </div>
+        <button class="icon-button modal-close" type="button" data-close-dialog="checkpoint-dialog" aria-label="Close"><span aria-hidden="true">×</span></button>
+      </div>
+      <label class="field-label" for="checkpoint-name">Checkpoint name</label>
+      <input class="text-input" id="checkpoint-name" maxlength="80" autocomplete="off" placeholder="Before redesign" required>
+      <p class="field-help">Checkpoints are private to this device. Restoring one creates another safety checkpoint first.</p>
+      <div class="modal-actions">
+        <button class="button button-quiet" type="button" data-close-dialog="checkpoint-dialog">Cancel</button>
+        <button class="button button-primary" type="submit" id="checkpoint-create-button">Create checkpoint</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="init-dialog" aria-labelledby="init-title">
+    <form method="dialog" id="init-form">
+      <div class="modal-header">
+        <div>
+          <h2 id="init-title">Start syncing this folder</h2>
+          <p>Carry adds private device metadata in <code>.carry</code>. Your files stay where they are.</p>
+        </div>
+        <button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit"><span aria-hidden="true">×</span></button>
+      </div>
+      <label class="field-label" for="project-name">Project name</label>
+      <input class="text-input" id="project-name" name="project-name" maxlength="80" autocomplete="off" required>
+      <div class="modal-actions">
+        <button class="button button-secondary" value="cancel" type="submit">Cancel</button>
+        <button class="button button-primary" value="default" type="submit" id="init-submit">Initialize folder</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal pair-modal" id="pair-dialog" aria-labelledby="pair-title">
+    <div class="modal-header">
+      <div>
+        <h2 id="pair-title">Pair another device</h2>
+        <p id="pair-description">Use a secure local code nearby, or a private invitation across networks.</p>
+      </div>
+      <button class="icon-button modal-close" type="button" data-close-dialog="pair-dialog" aria-label="Close"><span aria-hidden="true">×</span></button>
+    </div>
+    <div class="segmented-control" role="tablist" aria-label="Pairing direction">
+      <button class="segment is-active" type="button" role="tab" aria-selected="true" data-pair-mode="send">Show a code</button>
+      <button class="segment" type="button" role="tab" aria-selected="false" data-pair-mode="receive">Enter a code</button>
+      <button class="segment" type="button" role="tab" aria-selected="false" data-pair-mode="remote">Different network</button>
+    </div>
+    <section class="pair-panel" id="pair-send-panel">
+      <div class="pair-illustration" aria-hidden="true">
+        <span class="fluent-icon">&#xE7F4;</span><span class="pair-line"></span><span class="fluent-icon">&#xE8CE;</span>
+      </div>
+      <h3>Start on this device</h3>
+      <p>Carry will display a secure code. Copy it to the other device; the code itself is never broadcast on your network.</p>
+      <button class="button button-primary" type="button" id="pair-send-button">Generate pairing code</button>
+    </section>
+    <form class="pair-panel" id="pair-receive-panel" hidden>
+      <label class="field-label" for="pair-code">Code from the other device</label>
+      <input class="text-input pairing-input" id="pair-code" maxlength="32" minlength="32" pattern="[A-Fa-f0-9]{32}" autocomplete="off" spellcheck="false" placeholder="Paste the 32-character secure code" required>
+      <p class="field-help">Use copy and paste when possible. The code becomes the private key shared by these two devices.</p>
+      <button class="button button-primary" type="submit">Find device</button>
+    </form>
+    <section class="remote-pair-panel" id="pair-remote-panel" hidden>
+      <div class="remote-choice">
+        <div class="remote-choice-copy">
+          <span class="remote-choice-icon fluent-icon" aria-hidden="true">&#xE774;</span>
+          <div><h3 id="remote-create-title">Create a private invitation</h3><p id="remote-create-copy">Keep Carry open, then send the invitation to the other person.</p>
+            <label class="team-size-field" id="team-size-field" for="team-size"><span>Team size</span><input id="team-size" type="number" min="2" max="16" step="1" value="2" inputmode="numeric"><small>devices total, including this one</small></label>
+          </div>
+        </div>
+        <button class="button button-primary" type="button" id="remote-create-button">Create invitation</button>
+      </div>
+      <div class="remote-error" id="remote-error" role="alert" hidden>
+        <span class="fluent-icon" aria-hidden="true">&#xE783;</span>
+        <div><strong>Couldn’t create the invitation</strong><p id="remote-error-message"></p></div>
+      </div>
+      <div class="remote-divider"><span>or join the other device</span></div>
+      <form id="remote-join-form" class="remote-join-form">
+        <label class="field-label" for="remote-invite">Private Carry invitation</label>
+        <input class="text-input remote-invite-input" id="remote-invite" autocomplete="off" spellcheck="false" placeholder="https://…/carry#…" required>
+        <p class="field-help">Paste the complete invitation. The secret after # stays on your devices.</p>
+        <button class="button button-secondary" type="submit" id="remote-join-button">Join invitation</button>
+      </form>
+      <div class="remote-invite-result" id="remote-invite-result" hidden>
+        <div class="remote-ready-line"><span class="status-dot is-online"></span><strong id="remote-ready-title">Private invitation ready</strong></div>
+        <p id="remote-capacity-copy">Send this complete invitation through a private message. It remains active while Carry runs, even if you close the window.</p>
+        <div class="remote-invite-box"><code id="remote-invite-value"></code><button class="icon-button" type="button" id="remote-copy-button" aria-label="Copy invitation"><span class="fluent-icon" aria-hidden="true">&#xE8C8;</span></button></div>
+        <button class="button button-quiet" type="button" id="remote-stop-button">Stop remote session</button>
+      </div>
+      <div class="remote-invite-result" id="remote-session-result" hidden>
+        <div class="remote-ready-line"><span class="status-dot is-online"></span><strong>Secure remote session active</strong></div>
+        <p id="remote-session-copy">You can sync again without pasting the invitation.</p>
+        <button class="button button-quiet" type="button" data-action="stop-remote">Stop remote session</button>
+      </div>
+    </section>
+  </dialog>
+
+  <dialog class="modal confirmation-modal" id="confirmation-dialog" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">
+    <form class="confirmation-form" method="dialog">
+      <div class="confirmation-body">
+        <span class="confirmation-icon fluent-icon" id="confirmation-icon" aria-hidden="true">&#xE946;</span>
+        <div class="confirmation-copy">
+          <h2 id="confirmation-title">Confirm action</h2>
+          <p id="confirmation-message"></p>
+        </div>
+      </div>
+      <div class="modal-actions confirmation-actions">
+        <button class="button button-secondary" type="submit" value="cancel">Cancel</button>
+        <button class="button button-primary confirmation-confirm" id="confirmation-confirm" type="submit" value="confirm">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal path-modal" id="path-dialog" aria-labelledby="path-title">
+    <form id="path-form">
+      <div class="modal-header">
+        <div>
+          <h2 id="path-title">Open a folder by path</h2>
+          <p>Use this when you already know the exact folder location.</p>
+        </div>
+        <button class="icon-button modal-close" type="button" data-close-dialog="path-dialog" aria-label="Close"><span aria-hidden="true">×</span></button>
+      </div>
+      <label class="field-label" for="folder-path-input">Folder path</label>
+      <input class="text-input path-input" id="folder-path-input" autocomplete="off" spellcheck="false" placeholder="C:\Users\you\Desktop\project" required>
+      <div class="modal-actions">
+        <button class="button button-secondary" type="button" data-close-dialog="path-dialog">Cancel</button>
+        <button class="button button-primary" type="submit">Open folder</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

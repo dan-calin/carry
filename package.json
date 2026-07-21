@@ -1,0 +1,64 @@
+{
+  "name": "carry",
+  "version": "0.2.4",
+  "private": true,
+  "description": "End-to-end encrypted project-folder and agent-memory sync over LAN or a relay.",
+  "bin": {
+    "carry": "bin/carry.js"
+  },
+  "scripts": {
+    "test": "node test/smoke.js && node test/ui-itest.js",
+    "test:all": "node scripts/test-all.js",
+    "test:ui": "node test/ui-itest.js",
+    "test:sync": "node test/sync-itest.js",
+    "test:app": "node test/app-itest.js",
+    "test:setup": "node test/setup-itest.js",
+    "test:lan": "node test/lan-itest.js",
+    "test:relay": "node test/relay-itest.js",
+    "test:cloudflare": "node test/cloudflare-relay-itest.js",
+    "test:remote": "node test/remote-itest.js",
+    "test:tunnel": "node test/tunnel-itest.js",
+    "test:launcher": "node test/launcher-itest.js",
+    "test:security": "node test/security-itest.js",
+    "test:firewall": "node test/firewall-itest.js",
+    "test:transfer": "node test/transfer-store-itest.js",
+    "test:large-project": "node test/large-project-itest.js",
+    "test:storage-health": "node test/storage-health-itest.js",
+    "test:resume": "node test/resume-itest.js",
+    "test:staged": "node test/staged-sync-itest.js",
+    "test:p2p": "node test/p2p-itest.js",
+    "test:package": "node test/package-itest.js",
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "build:tauri": "tauri build --no-bundle",
+    "build:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
+    "relay:dev": "wrangler dev --config cloudflare-relay/wrangler.jsonc",
+    "relay:deploy": "wrangler deploy --config cloudflare-relay/wrangler.jsonc"
+  },
+  "dependencies": {
+    "node-datachannel": "0.32.3"
+  },
+  "keywords": [
+    "sync",
+    "folder-sync",
+    "shared-agent-memory",
+    "peer-to-peer",
+    "lan"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "bin",
+    "app",
+    "lib",
+    "relay",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "wrangler": "4.112.0"
+  }
+}

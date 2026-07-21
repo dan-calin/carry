@@ -1,0 +1,30 @@
+[package]
+name = "carry-desktop"
+version = "0.2.4"
+description = "Native desktop shell for Carry"
+authors = ["Carry contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+build = "build.rs"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "carry"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+fs2 = "=0.4.3"
+serde_json = "1"
+tauri = { version = "=2.11.5", features = [] }
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "=0.56.0"

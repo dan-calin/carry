@@ -1,0 +1,17 @@
+.build/
+.build-cache/
+.agents/
+.carry/
+.shared-memory/
+dist/
+node_modules/
+.wrangler/
+src-tauri/target/
+.env
+.env.*
+!.env.example
+*.log
+*.pfx
+*.p12
+Thumbs.db
+.DS_Store

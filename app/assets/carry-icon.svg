@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Carry</title>
+  <desc id="description">A cobalt transfer loop carrying a small data packet.</desc>
+  <rect x="24" y="24" width="464" height="464" rx="104" fill="#20242b"/>
+  <path fill="#2c66d6" d="M378 114H236C155 114 90 178 90 256s65 142 146 142h142c20 0 36-16 36-36v-36c0-20-16-36-36-36h-32l-44 44h-64c-45 0-82-35-82-78s37-78 82-78h64l44 44h32c20 0 36-16 36-36v-36c0-20-16-36-36-36Z"/>
+  <rect x="316" y="228" width="62" height="62" rx="16" fill="#f5f6f8"/>
+</svg>

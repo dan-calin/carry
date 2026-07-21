@@ -1,0 +1,29 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "carry-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-20",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CARRY_ROOMS",
+        "class_name": "CarryRoom"
+      },
+      {
+        "name": "CARRY_LIMITERS",
+        "class_name": "ConnectionLimiter"
+      }
+    ]
+  },
+  "exports": {
+    "CarryRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "ConnectionLimiter": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
+}
