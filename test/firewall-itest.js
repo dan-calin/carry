@@ -35,6 +35,8 @@ const firewall = require('../lib/firewall');
     const elevatedScript = Buffer.from(encodedMatch[1], 'base64').toString('utf16le');
     assert.ok(elevatedScript.includes('-PolicyStore PersistentStore'));
     assert.ok(elevatedScript.includes('-PolicyStore ActiveStore'));
+    assert.ok(!elevatedScript.includes('WriteAllText') && !elevatedScript.includes('$statusPath'),
+      'the elevated helper never writes through a user-controlled temporary pathname');
     const parserScript = [
       `$source = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encodedMatch[1]}'))`,
       '$tokens = $null',
@@ -61,21 +63,15 @@ const firewall = require('../lib/firewall');
     assert.strictEqual(checks, 5);
     assert.strictEqual(pauses, 4);
 
-    const statusPath = path.join(os.tmpdir(), `carry-firewall-test-${process.pid}.json`);
     const denied = firewall.installLanRules({
       platform: 'win32',
-      statusPath,
-      runner: () => {
-        fs.writeFileSync(statusPath, JSON.stringify({ ok: false, error: 'Access is denied.' }));
-        return { status: 1, error: null, stderr: '' };
-      },
+      runner: () => ({ status: 1, error: null, stderr: 'Access is denied.' }),
       ruleCheck: () => false,
       sleep: () => {},
     });
     assert.strictEqual(denied.ok, false);
     assert.match(denied.message, /administrator or device policy/i,
       'real Windows failures produce actionable guidance');
-    assert.strictEqual(fs.existsSync(statusPath), false, 'private elevated status is cleaned up');
 
     const cancelled = firewall.installLanRules({
       platform: 'win32',

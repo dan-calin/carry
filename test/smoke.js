@@ -13,6 +13,7 @@ const memory = require('../lib/memoryMerge');
 const sync = require('../lib/sync');
 const fsx = require('../lib/fsx');
 const manifest = require('../lib/manifest');
+const privateState = require('../lib/private-state');
 
 let passed = 0;
 function ok(name, cond) {
@@ -70,14 +71,15 @@ function ok(name, cond) {
   fs.rmSync(tmp, { recursive: true, force: true });
 })();
 
-// 4. manifest init is idempotent and creates .carry.
+// 4. manifest init is idempotent and keeps private state outside the project.
 (function testManifest() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'carry-mani-'));
   const r1 = manifest.init(tmp, 'demo');
   ok('init creates project', r1.created === true);
   ok('init writes deviceId', typeof r1.manifest.deviceId === 'string' && r1.manifest.deviceId.length > 0);
-  ok('.carry protects private metadata from ordinary git adds',
-    fs.readFileSync(path.join(tmp, '.carry', '.gitignore'), 'utf8') === '*\n!.gitignore\n');
+  ok('private metadata is stored outside the selected project',
+    manifest.manifestFile(tmp).startsWith(path.join(process.env.LOCALAPPDATA, 'Carry')) &&
+    !fs.existsSync(path.join(tmp, '.carry')));
   const r2 = manifest.init(tmp, 'demo');
   ok('re-init is idempotent', r2.created === false && r2.manifest.deviceId === r1.manifest.deviceId);
   ok('findCarryRoot locates it', manifest.findCarryRoot(tmp) === tmp);
@@ -85,6 +87,9 @@ function ok(name, cond) {
   ok('special object keys cannot enter peers or the allowlist',
     !manifest.readAllowlist(tmp).includes('__proto__') && manifest.listPeers(tmp).length === 0);
   manifest.addPeer(tmp, 'peer0001', 'Laptop', 'lan', { address: '192.168.1.20', port: 48124, pairCode: 'A'.repeat(32) });
+  const storedManifest = fs.readFileSync(manifest.manifestFile(tmp), 'utf8');
+  ok('pairing credentials are encrypted at rest for the current Windows user',
+    !storedManifest.includes('A'.repeat(32)) && storedManifest.includes('pairCodeProtected'));
   manifest.setPeerConnection(tmp, 'peer0001', false);
   ok('disconnect keeps the paired device but removes runtime authorization',
     manifest.listPeers(tmp)[0].connectionEnabled === false && !manifest.readAllowlist(tmp).includes('peer0001'));
@@ -96,13 +101,62 @@ function ok(name, cond) {
 
 (function testCorruptManifestPreserved() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'carry-corrupt-manifest-'));
-  const dir = path.join(tmp, '.carry');
+  const dir = privateState.projectDir(tmp);
   const file = path.join(dir, 'manifest.json');
   fs.mkdirSync(dir, { recursive: true });
   const corrupt = '{"version":1,"deviceId":"missing-fields"}\n';
   fs.writeFileSync(file, corrupt);
   assert.throws(() => manifest.init(tmp, 'replacement'), /metadata is corrupt/);
-  ok('corrupt project metadata is never silently reinitialized', fs.readFileSync(file, 'utf8') === corrupt);
+  ok('corrupt project metadata is never silently reinitialized',
+    fs.readFileSync(manifest.manifestFile(tmp), 'utf8') === corrupt);
+  fs.rmSync(tmp, { recursive: true, force: true });
+})();
+
+(function testUnsafeLegacyStateLinkRejected() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'carry-linked-state-'));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'carry-linked-target-'));
+  const sentinel = '{"untrusted":true}\n';
+  fs.writeFileSync(path.join(target, 'manifest.json'), sentinel);
+  fs.symlinkSync(target, path.join(tmp, '.carry'), process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(() => manifest.init(tmp, 'unsafe'), /unsafe \.carry link/i,
+    'a project-controlled metadata junction must never redirect private writes');
+  ok('unsafe legacy metadata links are rejected before any write',
+    fs.readFileSync(path.join(target, 'manifest.json'), 'utf8') === sentinel);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.rmSync(target, { recursive: true, force: true });
+})();
+
+(function testLegacyStateMigration() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'carry-legacy-state-'));
+  const legacy = path.join(tmp, '.carry');
+  fs.mkdirSync(path.join(legacy, 'backups', 'old-session'), { recursive: true });
+  fs.writeFileSync(path.join(legacy, 'backups', 'old-session', 'note.txt'), 'recovery copy');
+  fs.writeFileSync(path.join(legacy, 'manifest.json'), JSON.stringify({
+    version: 1,
+    name: 'legacy project',
+    deviceId: 'legacydevice',
+    peers: {
+      legacypeer: {
+        name: 'Old laptop',
+        transport: 'lan',
+        address: '192.168.1.30',
+        port: 48124,
+        pairCode: 'B'.repeat(32),
+      },
+    },
+    allowlist: ['legacypeer'],
+    createdAt: new Date().toISOString(),
+  }, null, 2) + '\n');
+
+  const migrated = manifest.readManifest(tmp);
+  const privateDir = path.dirname(manifest.manifestFile(tmp));
+  const stored = fs.readFileSync(path.join(privateDir, 'manifest.json'), 'utf8');
+  ok('verified legacy state migrates outside the project without losing recovery data',
+    migrated.peers.legacypeer.pairCode === 'B'.repeat(32) &&
+    !fs.existsSync(legacy) &&
+    fs.readFileSync(path.join(privateDir, 'backups', 'old-session', 'note.txt'), 'utf8') === 'recovery copy' &&
+    !stored.includes('B'.repeat(32)) && stored.includes('pairCodeProtected'));
+  fs.rmSync(privateDir, { recursive: true, force: true });
   fs.rmSync(tmp, { recursive: true, force: true });
 })();
 

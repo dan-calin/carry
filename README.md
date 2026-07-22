@@ -177,8 +177,10 @@ separate backup for important work.
   not include them in screenshots, issues, or commits.
 - The relay can observe connection details such as IP addresses, timing, and
   traffic size, but it is not intended to store project files.
-- Local pairing information, checkpoints, and activity history live in the
-  project's `.carry` folder. Carry automatically keeps that folder out of Git.
+- Local pairing information, checkpoints, and activity history live in Carry's
+  private app-data directory (`%LOCALAPPDATA%\Carry` on Windows), outside the
+  selected project. Pairing credentials are encrypted for the current Windows
+  user. Legacy `.carry` state is securely migrated when the project is opened.
 - Shared AI-agent memory may live in `.shared-memory`, which is also ignored by
   this repository.
 

@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const manifest = require('../lib/manifest');
 const transport = require('../lib/transport');
+const privateState = require('../lib/private-state');
 
 const CARRY = path.join(__dirname, '..', 'bin', 'carry.js');
 const T = () => new Date().toISOString().slice(11, 23);
@@ -97,7 +98,7 @@ function stopChild(child) {
 
   // Model a hard-killed previous sender. A safely contained snapshot older
   // than the transfer TTL should be pruned before the next outgoing copy.
-  const staleSnapshot = path.join(A, '.carry', 'outgoing', 'f'.repeat(24));
+  const staleSnapshot = privateState.projectFile(A, 'outgoing', 'f'.repeat(24));
   fs.mkdirSync(staleSnapshot, { recursive: true });
   fs.writeFileSync(path.join(staleSnapshot, '000000.part'), 'abandoned');
   const oldSnapshotTime = new Date(Date.now() - 25 * 60 * 60 * 1000);
@@ -202,7 +203,7 @@ function stopChild(child) {
   console.log('RESULT explicit LAN Pull mirrors the selected peer:', pullPass);
 
   const outgoingEntries = (root) => {
-    const directory = path.join(root, '.carry', 'outgoing');
+    const directory = privateState.projectFile(root, 'outgoing');
     return fs.existsSync(directory) ? fs.readdirSync(directory) : [];
   };
   const snapshotCleanupPass = outgoingEntries(A).length === 0 && outgoingEntries(B).length === 0;

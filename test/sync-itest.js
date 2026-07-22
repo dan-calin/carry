@@ -7,6 +7,7 @@ const path = require('path');
 const checkpoints = require('../lib/checkpoints');
 const engine = require('../lib/sync-engine');
 const manifest = require('../lib/manifest');
+const privateState = require('../lib/private-state');
 const sync = require('../lib/sync');
 
 function write(root, rel, value) {
@@ -16,7 +17,10 @@ function write(root, rel, value) {
 }
 
 function read(root, rel) {
-  return fs.readFileSync(path.join(root, ...rel.split('/')), 'utf8');
+  const file = rel.startsWith('.carry/')
+    ? privateState.projectFile(root, ...rel.slice('.carry/'.length).split('/'))
+    : path.join(root, ...rel.split('/'));
+  return fs.readFileSync(file, 'utf8');
 }
 
 function round(a, b, aId = 'device-a', bId = 'device-b', syncSourceDeviceId = null) {
@@ -244,7 +248,7 @@ function allFiles(root) {
       assert.strictEqual(staleResult.resultB.conflicts.length, 0);
       assert.strictEqual(read(staleB, 'handoff.txt'), 'new work from the newly active PC',
         'a newer Active Device handoff overrides an older unfinished per-file choice');
-      assert.ok(!fs.existsSync(path.join(staleA, '.carry', 'resolutions', staleManifestB.deviceId + '.json')),
+      assert.ok(!fs.existsSync(privateState.projectFile(staleA, 'resolutions', staleManifestB.deviceId + '.json')),
         'successful active-device sync clears the stale pending choice');
     } finally {
       fs.rmSync(staleA, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -277,7 +281,7 @@ function allFiles(root) {
     result = round(a, b);
     assert.ok(!fs.existsSync(path.join(b, 'src', 'app.txt')), 'intentional deletion reaches peer');
     assert.strictEqual(result.resultB.summary.deletedLocal, 1);
-    const backups = allFiles(path.join(b, '.carry', 'backups')).filter((file) => file.endsWith(path.join('src', 'app.txt')));
+    const backups = allFiles(privateState.projectFile(b, 'backups')).filter((file) => file.endsWith(path.join('src', 'app.txt')));
     assert.ok(backups.length >= 1, 'deleted peer file has a recovery backup');
     assert.strictEqual(fs.readFileSync(backups.at(-1), 'utf8'), 'pc edit');
     const deletionCheckpoint = checkpoints.read(b, result.resultB.checkpointId);
@@ -481,7 +485,7 @@ function allFiles(root) {
 
     write(a, 'checkpoint-preview/restore.txt', 'restore this file');
     const stable = checkpoints.create(a, 'Stable local version');
-    const blobDir = path.join(a, '.carry', 'checkpoints', 'blobs');
+    const blobDir = privateState.projectFile(a, 'checkpoints', 'blobs');
     const blobsBeforeDuplicate = fs.readdirSync(blobDir).length;
     checkpoints.create(a, 'Stable local version copy');
     assert.strictEqual(fs.readdirSync(blobDir).length, blobsBeforeDuplicate, 'unchanged checkpoint file data is deduplicated');
@@ -511,7 +515,7 @@ function allFiles(root) {
     assert.throws(() => checkpoints.restore(a, integrityCheckpoint.checkpointId), /integrity verification/);
     assert.strictEqual(read(a, 'checkpoint-integrity.txt'), 'working file remains safe', 'corrupt checkpoint is rejected before project mutation');
 
-    const sessions = allFiles(path.join(a, '.carry', 'sessions')).filter((file) => file.endsWith('.json'));
+    const sessions = allFiles(privateState.projectFile(a, 'sessions')).filter((file) => file.endsWith('.json'));
     assert.ok(sessions.length >= 5, 'sync sessions are recorded for status/history UI');
     assert.ok(engine.listSessions(a, 2).length === 2, 'session history API is available to the UI');
     const lastCompleted = JSON.parse(fs.readFileSync(sessions.find((file) => JSON.parse(fs.readFileSync(file, 'utf8')).status === 'completed'), 'utf8'));

@@ -11,6 +11,7 @@ const folderPicker = require('../lib/folder-picker');
 const transport = require('../lib/transport');
 const relayClient = require('../lib/relay');
 const frameCrypto = require('../lib/crypto');
+const privateState = require('../lib/private-state');
 const {
   IncomingTransferStore,
   MAX_EXPECTED_CHUNKS,
@@ -220,7 +221,7 @@ function buildBundle(root, selfAgent, peerId, syncSourceDeviceId) {
     if (!Number.isSafeInteger(selectedBytes) || selectedBytes > MAX_TRANSFER_FILE_BYTES) {
       throw new Error('selected file changes exceed Carry\'s 5 GiB one-exchange limit');
     }
-    const carryRoot = path.join(root, '.carry');
+    const carryRoot = privateState.projectDir(root);
     const outgoingRoot = path.join(carryRoot, 'outgoing');
     fs.mkdirSync(outgoingRoot, { recursive: true, mode: 0o700 });
     for (const directory of [carryRoot, outgoingRoot]) {
@@ -300,7 +301,7 @@ function cmdInit(args, flags) {
   log.title('Carry init' + (r.created ? '' : ' (already initialized)'));
   log.step(`Project: ${r.manifest.name}  (${r.root})`);
   log.step(`Device id: ${r.manifest.deviceId}`);
-  log.info('Metadata stored in .carry/ — git and your agent memory are untouched.');
+  log.info('Private metadata stored in your local Carry app data — the selected folder is untouched.');
   log.info('Next: run `carry pair` on this machine and `carry pair <code>` on the other.');
   log.done();
 }
@@ -2424,7 +2425,7 @@ function applyIncoming(root, m, peerId, bundle, syncSourceDeviceId, staged, prep
   }
   if (result.conflicts.length) {
     log.warn('Conflict: kept both machines unchanged for ' + result.conflicts.join(', '));
-    log.info('The conflict is recorded in .carry/sessions/' + result.sessionId + '.json');
+    log.info('The conflict is recorded in Carry private recovery storage (session ' + result.sessionId + ').');
   }
   if (result.activeResolved.length) {
     const source = result.activeDeviceId === m.deviceId ? 'this device' : 'the active peer';
@@ -2434,7 +2435,7 @@ function applyIncoming(root, m, peerId, bundle, syncSourceDeviceId, staged, prep
     const source = result.syncSourceDeviceId === m.deviceId ? 'this device' : 'the selected peer';
     log.info(`Sync direction used ${source} as the source for this exchange.`);
   }
-  if (result.backups.length) log.info('Backed up replaced/deleted files under .carry/backups/' + result.sessionId + '/');
+  if (result.backups.length) log.info('Backed up replaced/deleted files in Carry private recovery storage (session ' + result.sessionId + ').');
   if (!s.pulled && !s.deletedLocal && !result.conflicts.length && !result.skipped.length) {
     log.step('No incoming file changes from the peer in this exchange.');
   }
@@ -2457,7 +2458,7 @@ function cmdStatus() {
     }
   }
   const files = sync.listFiles(root);
-  log.info(`Tracked files: ${files.length}  (git + .carry excluded)`);
+  log.info(`Tracked files: ${files.length}  (Git and private Carry state excluded)`);
   const latest = syncEngine.listSessions(root, 1)[0];
   if (latest) {
     const conflicts = Array.isArray(latest.conflicts) ? latest.conflicts.length : 0;
@@ -2472,6 +2473,10 @@ async function cmdRelay(flags) {
   const port = parseInt(flags.port || '48125', 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('--port must be an integer from 1 to 65535');
   const relayServer = require('../relay/server');
+  const relayProjectRoot = manifest.findCarryRoot(process.cwd());
+  const relayManifestPath = relayProjectRoot
+    ? manifest.manifestFile(relayProjectRoot)
+    : privateState.appFile('relay-manifest.json');
   if (flags.tunnel) {
     const secret = relayClient.newRemoteSecret();
     const room = relayClient.roomForSecret(secret);
@@ -2479,6 +2484,7 @@ async function cmdRelay(flags) {
       host: '127.0.0.1',
       ignoreAllowlist: true,
       allowedRooms: new Set([room]),
+      manifestPath: relayManifestPath,
     });
     try {
       if (!server.listening) {
@@ -2510,8 +2516,8 @@ async function cmdRelay(flags) {
       throw error;
     }
   }
-  if (flags.web) return relayServer.startWebRelay(port, { host: '0.0.0.0' });
-  return relayServer.startRelay(port);
+  if (flags.web) return relayServer.startWebRelay(port, { host: '0.0.0.0', manifestPath: relayManifestPath });
+  return relayServer.startRelay(port, { manifestPath: relayManifestPath });
 }
 
 async function cmdApp(flags) {
@@ -2683,7 +2689,7 @@ Notes:
   - .git is always excluded — git stays git's job.
   - .shared-memory/memory.json is union-merged, never overwritten.
   - One-device edits/deletions sync; two-device edits become safe conflicts.
-  - Replaced/deleted files are backed up under .carry/backups/.
+  - Replaced/deleted files are backed up in private Carry app data.
   - Files with an active shared-agent-memory claim are paused, not clobbered.
   - Direct LAN sync needs no relay. For different networks, run
     \`carry relay --tunnel\`, then use its complete secure invite on both

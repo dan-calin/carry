@@ -378,7 +378,7 @@ function renderUninitialized() {
   main.innerHTML = `<div class="onboarding"><section class="onboarding-panel">
     <div class="onboarding-symbol fluent-icon" aria-hidden="true">&#xE7C3;</div>
     <h2>${escapeHtml(model.folder.name)} is ready to be added</h2>
-    <p>Carry will create a small <code>.carry</code> metadata folder with this device’s identity, trusted peers, and local recovery history.</p>
+    <p>Carry keeps this device’s identity, trusted peers, and recovery history in private local app data, outside the selected folder.</p>
     <div class="onboarding-actions">
       <button class="button button-primary" type="button" data-action="show-init">Initialize folder</button>
       <button class="button button-secondary" type="button" data-action="choose-folder"${folderSelectionAttributes()}>Choose another</button>

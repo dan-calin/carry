@@ -18,6 +18,7 @@ const {
   TRANSFER_TTL_MS,
   QUOTA_LOCK_STALE_MS,
 } = require('../lib/transfer-store');
+const privateState = require('../lib/private-state');
 
 function digest(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
@@ -44,7 +45,7 @@ function options(exchangeId, overrides) {
 }
 
 function exchangeDirectory(root, exchangeId) {
-  return path.join(root, '.carry', 'incoming', exchangeId.toLowerCase());
+  return privateState.projectFile(root, 'incoming', exchangeId.toLowerCase());
 }
 
 const roots = [];
@@ -202,7 +203,7 @@ try {
   // it must not permanently block all future transfers.
   const staleLockRoot = makeRoot('stale-lock');
   roots.push(staleLockRoot);
-  const staleIncoming = path.join(staleLockRoot, '.carry', 'incoming');
+  const staleIncoming = privateState.projectFile(staleLockRoot, 'incoming');
   fs.mkdirSync(staleIncoming, { recursive: true });
   const staleLock = path.join(staleIncoming, '.quota.lock');
   fs.writeFileSync(staleLock, '{incomplete');
@@ -281,7 +282,7 @@ try {
   const cleanupBOptions = options('88889999aaaabbbbccccdddd');
   const cleanupA = new IncomingTransferStore(cleanupRoot, cleanupAOptions);
   const cleanupB = new IncomingTransferStore(cleanupRoot, cleanupBOptions);
-  const sentinel = path.join(cleanupRoot, '.carry', 'incoming', 'keep.txt');
+  const sentinel = privateState.projectFile(cleanupRoot, 'incoming', 'keep.txt');
   fs.writeFileSync(sentinel, 'keep');
   cleanupA.cleanup();
   assert.ok(!fs.existsSync(exchangeDirectory(cleanupRoot, cleanupAOptions.exchangeId)));

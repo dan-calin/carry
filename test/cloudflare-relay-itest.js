@@ -131,7 +131,8 @@ async function requireStatus(response, expected, label) {
     clients.push(a, b);
     a.setRelay(invite);
     b.setRelay(invite);
-    await a.join(secret, 'cloudflare-a', (frame) => receivedA.push(frame), 'A', secret);
+    await a.join(secret, 'cloudflare-a', (frame) => receivedA.push(frame), 'A', secret)
+      .catch((error) => { error.message = `first hosted peer: ${error.message}`; throw error; });
     const unjoinedUrl = new URL('/carry', baseUrl);
     unjoinedUrl.searchParams.set('room', relay.roomForSecret(secret));
     const unjoined = new WebSocket(unjoinedUrl);
@@ -139,7 +140,10 @@ async function requireStatus(response, expected, label) {
     const unjoinedClosed = socketEvent(unjoined, 'close');
     unjoined.send(JSON.stringify({ type: 'join', proof: 'invalid' }));
     await unjoinedClosed;
-    await b.join(secret, 'cloudflare-b', (frame) => receivedB.push(frame), 'B', secret);
+    assert.ok(a.webSocket.readyState === 1,
+      'expiring an unauthenticated socket must not evict the valid waiting peer');
+    await b.join(secret, 'cloudflare-b', (frame) => receivedB.push(frame), 'B', secret)
+      .catch((error) => { error.message = `second hosted peer: ${error.message}`; throw error; });
     assert.ok(!receivedA.some((frame) => frame.type === 'peer-gone'),
       'an unjoined socket cannot evict the waiting Carry peer');
     const readyDeadline = Date.now() + 3000;

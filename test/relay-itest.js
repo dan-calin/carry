@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const frameCrypto = require('../lib/crypto');
+const manifest = require('../lib/manifest');
 const remoteRelay = require('../lib/relay');
 
 const CARRY = path.join(__dirname, '..', 'bin', 'carry.js');
@@ -74,8 +74,8 @@ async function testBinaryWebSocketRelay() {
       'binary relay payload changed in transit');
     console.log('RESULT negotiated binary frame stayed encrypted and arrived as raw bytes: true');
 
-    // A client that does not advertise the v2 feature must keep both sides on
-    // the v1 encrypted-text path. This also models a pre-upgrade Carry build.
+    // A pre-session-handshake client must fail closed. Falling back to its old
+    // long-lived-key framing would re-enable cross-run ciphertext replay.
     const legacySecret = remoteRelay.newRemoteSecret();
     const legacyInvite = remoteRelay.createRemoteInvite(endpoint, legacySecret);
     const legacyAddress = remoteRelay.parseRelayAddress(legacyInvite);
@@ -98,21 +98,16 @@ async function testBinaryWebSocketRelay() {
     await waitFor(() => legacyMessages.some((message) => message.type === 'relay-wait'),
       'legacy client did not join relay');
 
-    const modernClient = new remoteRelay.RelayClient();
+    const modernClient = new remoteRelay.RelayClient({ sessionHandshakeMs: 75 });
     modernClient.setRelay(legacyInvite);
-    await modernClient.join('', 'MODERN_DEVICE_B', () => {}, 'modern');
-    assert.strictEqual(modernClient.peerSupportsBinary, false,
-      'binary feature was enabled for a peer that did not advertise it');
-    assert.throws(() => modernClient.sendBinary({ type: 'must-fallback' }, Buffer.from('x')),
-      /does not support/);
-    modernClient.send({ type: 'legacy-text-fallback', marker: 'still encrypted' });
-    await waitFor(() => legacyMessages.some((message) => message.v === 1 && message.c),
-      'legacy peer did not receive encrypted text fallback');
-    const legacyEnvelope = legacyMessages.find((message) => message.v === 1 && message.c);
-    const legacyFrame = frameCrypto.decryptFrame(legacyEnvelope, legacySecret);
-    assert.strictEqual(legacyFrame.type, 'legacy-text-fallback');
-    assert.strictEqual(legacyFrame.marker, 'still encrypted');
-    console.log('RESULT old client safely falls back to encrypted text: true');
+    await assert.rejects(
+      modernClient.join('', 'MODERN_DEVICE_B', () => {}, 'modern'),
+      /fresh encrypted-session handshake/,
+      'an old client must not downgrade a modern peer to replayable framing',
+    );
+    assert.throws(() => modernClient.send({ type: 'must-not-downgrade' }),
+      /fresh encrypted relay session is not ready/);
+    console.log('RESULT old replayable client is rejected instead of downgrading: true');
     modernClient.close();
     legacySocket.close();
 
@@ -185,7 +180,7 @@ async function testBinaryWebSocketRelay() {
   console.log(T(), 'await pair A');
   await pa;
   console.log(T(), 'paired');
-  console.log('A manifest peers:', JSON.stringify(JSON.parse(fs.readFileSync(path.join(A,'.carry','manifest.json'),'utf8')).peers));
+  console.log('A manifest peers:', JSON.stringify(manifest.readManifest(A).peers));
   await new Promise(r => setTimeout(r, 1500)); // let the pairing room fully tear down on the relay
 
   fs.mkdirSync(path.join(A, 'src'), { recursive: true });

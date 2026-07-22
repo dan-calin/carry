@@ -7,6 +7,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const relay = require('../relay/server');
 const relayClient = require('../lib/relay');
+const manifest = require('../lib/manifest');
 const tunnelHelper = require('../lib/tunnel');
 const {
   IncomingTransferStore,
@@ -87,8 +88,8 @@ function run(args, cwd, timeoutMs = 180000, extraEnv) {
     assert.ok(pairResults.every((result) => result.code === 0), JSON.stringify(pairResults));
     assert.ok(pairResults.every((result) => !result.stdout.includes(secret)), 'remote secret is not printed by pair logs');
 
-    const firstManifest = JSON.parse(fs.readFileSync(path.join(first, '.carry', 'manifest.json'), 'utf8'));
-    const secondManifest = JSON.parse(fs.readFileSync(path.join(second, '.carry', 'manifest.json'), 'utf8'));
+    const firstManifest = manifest.readManifest(first);
+    const secondManifest = manifest.readManifest(second);
     const directEnvironment = { CARRY_EXPERIMENTAL_P2P: '1' };
     const rejectingEnvironment = {
       CARRY_EXPERIMENTAL_P2P: '1',

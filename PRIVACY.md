@@ -6,12 +6,15 @@ analytics, advertising, or hosted file storage.
 ## Data kept on your devices
 
 Carry stores device identity, pairing details, sync baselines, checkpoints,
-temporary transfer data, and activity records under `.carry` inside the selected
-project. Shared agent memory may be stored under `.shared-memory`. Both paths are
-ignored by this repository, and Carry protects a project's `.carry` directory
-from accidental Git inclusion when it initializes the folder.
+temporary transfer data, and activity records in the operating system's private
+app-data directory (`%LOCALAPPDATA%\Carry` on Windows), keyed to the selected
+project but outside it. Pairing credentials are encrypted with a key protected
+for the current Windows user. A real legacy `.carry` directory is verified and
+migrated into private app data when its project is first opened; links and
+reparse points are rejected. Shared agent memory may remain under
+`.shared-memory` in the selected project and is ignored by this repository.
 
-Pairing records contain credentials. Do not publish, email, or commit `.carry`,
+Pairing records and invitations contain credentials. Do not publish or email
 invitation URLs, diagnostic logs, or screenshots that expose a complete code.
 Forgetting a device removes its local trust record; remove the peer on every
 device that should no longer trust it and create a fresh invitation.
@@ -37,5 +40,7 @@ public deployment should publish its own operator and retention information.
 
 Use **Forget device** to remove a saved pairing. Checkpoints can be deleted from
 Carry's recovery interface. To remove all Carry metadata from a project, first
-disconnect it from every paired device and close Carry, then delete that
-project's `.carry` directory. This does not delete the project files themselves.
+disconnect it from every paired device and close Carry, then remove that
+project's hashed directory under `%LOCALAPPDATA%\Carry\projects`. The
+`project.json` file inside each hashed directory records the canonical project
+path so you can identify the correct one. This does not delete project files.
