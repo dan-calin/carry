@@ -188,12 +188,13 @@ Read [PRIVACY.md](PRIVACY.md) for the full data explanation and
 ## What this portfolio project demonstrates
 
 Carry is part of the portfolio I am building to demonstrate practical AI
-literacy and AI-assisted software development.
+literacy and AI-driven software development.
 
-I used AI to accelerate research, implementation, testing, and review, but the
-goal was never to accept generated code automatically. The project was shaped
-by repeatedly asking what could fail, what could damage user work, and how each
-assumption could be tested.
+I used AI as the primary coding tool while I directed and evaluated the work:
+defining the problem, reviewing the code and issues, testing behaviour, and
+deciding what was ready to keep. The goal was never to accept generated code
+automatically. The project was shaped by repeatedly asking what could fail,
+what could damage user work, and how each assumption could be tested.
 
 The work demonstrates:
 
@@ -203,7 +204,8 @@ The work demonstrates:
   checks, and conflict preservation.
 - Attention to accessibility, documentation, installation, and everyday user
   experience.
-- Using automated tests and real release builds to verify AI-assisted work.
+- Using automated tests and real release builds to verify AI-generated
+  implementation.
 - Preparing a project for public review and open-source contribution.
 
 Feedback, questions, code review, usability observations, and constructive
