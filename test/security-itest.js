@@ -33,6 +33,20 @@ function check(name, cond) {
   try { crypto.decryptFrame(env, 'ZZZZ99'); } catch { rejected = true; }
   check('wrong code is rejected (auth tag fails)', rejected);
   check('encrypted blob is not plaintext', !JSON.stringify(env).includes('secret'));
+  const boundInfo = 'carry-text-session-v1:' + 'a'.repeat(64);
+  const bound = crypto.encryptFrame(obj, code, salt, boundInfo);
+  assert.throws(() => crypto.decryptFrame(bound, code, 'carry-text-session-v1:' + 'b'.repeat(64)),
+    /context does not match/, 'a frame from another session must be rejected before dispatch');
+  check('encrypted text frames are bound to the expected session context',
+    crypto.decryptFrame(bound, code, boundInfo).type === 'sync-bundle');
+  const senderState = crypto.createSessionState('c'.repeat(64));
+  const receiverState = crypto.createSessionState('c'.repeat(64));
+  const sequenced = crypto.sealSessionFrame(senderState, obj);
+  check('authenticated session accepts the next exact frame sequence',
+    crypto.openSessionFrame(receiverState, sequenced).type === 'sync-bundle');
+  assert.throws(() => crypto.openSessionFrame(receiverState, sequenced), /replayed or out-of-order/,
+    'the same authenticated frame must not be accepted twice');
+  check('authenticated session rejects a replayed frame', true);
 
   const binaryMetadata = { type: 'file-chunk-v2', path: 'private/video.bin', index: 7, total: 12 };
   const binaryPayload = Buffer.concat([
@@ -363,10 +377,13 @@ function check(name, cond) {
     check('per-IP relay connection rate limit rejects excess attempts', limited.result.startsWith('error:relay connection limit'));
     rateServer.close();
     fs.rmSync(dir, { recursive: true, force: true });
-  })();
+  })().catch((error) => {
+    console.error('SECURITY TEST FAILED:', error);
+    process.exitCode = 1;
+  });
 })();
 
 setTimeout(() => {
   console.log('\n' + passed + ' security checks passed.');
-  process.exit(0);
+  if (process.exitCode === undefined) process.exitCode = 0;
 }, 4000);

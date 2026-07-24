@@ -17,6 +17,12 @@ let selectedSessionId = null;
 let selectedCheckpointId = null;
 let checkpointPreview = null;
 let checkpointPreviewRequestId = 0;
+let memoryModel = null;
+let memoryRequestId = 0;
+let selectedMemoryName = null;
+let selectedMemorySnapshot = null;
+let memoryHighlightSessionId = null;
+let memoryQuery = '';
 let currentDiff = null;
 const selectedConflictKeys = new Set();
 let pollTimer = null;
@@ -45,6 +51,7 @@ function focusedElementDescriptor() {
   if (element.id) return { selector: `#${element.id}` };
   const names = [
     'data-view', 'data-action', 'data-peer-id', 'data-session', 'data-checkpoint',
+    'data-memory-item', 'data-memory-link', 'data-memory-session',
     'data-conflict-session', 'data-conflict-path', 'data-file-path',
   ];
   const attributes = names
@@ -65,6 +72,7 @@ function restoreFocusedElement(descriptor) {
 const viewCopy = {
   overview: ['Overview', 'Your folder, devices, and recent sync activity.'],
   activity: ['Activity', 'A local record of completed sync sessions and file actions.'],
+  memory: ['Memory', 'Inspect and manage the durable context shared with your coding agents.'],
   checkpoints: ['Checkpoints', 'Named restore points and automatic safety snapshots stored on this device.'],
   conflicts: ['Conflicts', 'Compare independent edits and choose the version Carry should keep.'],
   devices: ['Devices', 'Trusted devices paired with this folder.'],
@@ -267,6 +275,8 @@ function sessionSummary(session) {
   if (foldersDeleted) parts.push(`${foldersDeleted} folder${foldersDeleted === 1 ? '' : 's'} deleted`);
   if (summary.conflicts) parts.push(`${summary.conflicts} conflict${summary.conflicts === 1 ? '' : 's'}`);
   if (summary.skipped) parts.push(`${summary.skipped} paused`);
+  const memoryAdditions = sessionMemoryAdditionCount(session);
+  if (memoryAdditions) parts.push(`${memoryAdditions} memory addition${memoryAdditions === 1 ? '' : 's'}`);
   return parts.length ? parts.join(' · ') : 'No project changes';
 }
 
@@ -315,6 +325,7 @@ function renderTopChrome() {
 
   const conflictCount = conflictsFromSessions().length;
   setNavCount('activity-count', model ? model.sessions.length : 0);
+  setNavCount('memory-count', model ? model.memory.entities : 0);
   setNavCount('checkpoint-count', model ? model.checkpoints.length : 0);
   setNavCount('conflict-count', conflictCount);
   setNavCount('device-count', model ? model.peers.length : 0);
@@ -378,7 +389,7 @@ function renderUninitialized() {
   main.innerHTML = `<div class="onboarding"><section class="onboarding-panel">
     <div class="onboarding-symbol fluent-icon" aria-hidden="true">&#xE7C3;</div>
     <h2>${escapeHtml(model.folder.name)} is ready to be added</h2>
-    <p>Carry will create a small <code>.carry</code> metadata folder with this device’s identity, trusted peers, and local recovery history.</p>
+    <p>Carry keeps this device’s identity, trusted peers, and recovery history in private local app data, outside the selected folder.</p>
     <div class="onboarding-actions">
       <button class="button button-primary" type="button" data-action="show-init">Initialize folder</button>
       <button class="button button-secondary" type="button" data-action="choose-folder"${folderSelectionAttributes()}>Choose another</button>
@@ -559,6 +570,250 @@ function renderActivity() {
   renderInspector();
 }
 
+function sessionById(sessionId) {
+  return (model?.sessions || []).find((session) => session.sessionId === sessionId) || null;
+}
+
+function sessionMemoryAdditionCount(session) {
+  const memory = session?.memory;
+  return memory
+    ? (memory.addedEntities || 0) + (memory.addedObservations || 0) + (memory.addedRelations || 0)
+    : 0;
+}
+
+function latestMemorySession() {
+  return (model?.sessions || []).find((session) =>
+    session.status === 'completed' && session.memory?.status === 'changed' &&
+    sessionMemoryAdditionCount(session) > 0) || null;
+}
+
+function memoryChangesForItem(session, name) {
+  const memory = session?.memory || {};
+  return {
+    entity: (memory.entities || []).find((item) => item.name === name) || null,
+    observations: (memory.observations || []).filter((item) => item.name === name),
+    relations: (memory.relations || []).filter((item) => item.from === name || item.to === name),
+  };
+}
+
+function memoryItemByName(name) {
+  return memoryModel && Array.isArray(memoryModel.items)
+    ? memoryModel.items.find((item) => item.name === name)
+    : null;
+}
+
+function memorySourceLabel(observation) {
+  if (!observation) return 'Source not recorded';
+  if (observation.provenance?.peerId) {
+    const peer = peerById(observation.provenance.peerId);
+    const when = observation.provenance.receivedAt ? ` · ${relativeTime(observation.provenance.receivedAt)}` : '';
+    return `Synced from ${peer ? peer.name : 'a paired device'}${when}`;
+  }
+  const attribution = !observation.author && observation.text
+    ? String(observation.text).match(/\(([^,()]{1,80}),\s*(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?)\)\s*$/)
+    : null;
+  const author = observation.author || attribution?.[1];
+  const recordedAt = observation.recordedAt || attribution?.[2];
+  if (author) {
+    const when = recordedAt ? ` · ${formatDate(recordedAt, false)}` : '';
+    return `Recorded by ${author}${when}`;
+  }
+  return 'Source not recorded';
+}
+
+function memoryUpdatedAt(item) {
+  const times = (item?.observations || []).flatMap((observation) => {
+    const fallback = String(observation.text || '').match(/\([^,()]{1,80},\s*(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?)\)\s*$/)?.[1];
+    return [
+      Date.parse(observation.recordedAt || fallback || ''),
+      Date.parse(observation.provenance?.receivedAt || ''),
+    ];
+  }).filter(Number.isFinite);
+  return times.length ? new Date(Math.max(...times)).toISOString() : null;
+}
+
+function memoryRelationLabel(relation, itemName) {
+  if (relation.from === itemName && relation.to === itemName) {
+    return `${relation.relationType} itself`;
+  }
+  if (relation.direction === 'outgoing') {
+    return `${relation.relationType} ${relation.to}`;
+  }
+  return `${relation.from} ${relation.relationType} this item`;
+}
+
+function memoryRows(items) {
+  if (!items.length) {
+    const emptyTitle = memoryQuery ? 'No memory matches this search' : 'No shared memory yet';
+    const emptyCopy = memoryQuery
+      ? 'Try a name, type, observation, or related item.'
+      : 'Your coding agents will add project facts and handoffs here as they work.';
+    return emptyPanel('\uE8F1', emptyTitle, emptyCopy, '');
+  }
+  const highlightedSession = sessionById(memoryHighlightSessionId);
+  return items.map((item) => {
+    const preview = item.observations[0]?.text || 'No observations recorded';
+    const updatedAt = memoryUpdatedAt(item);
+    const changes = memoryChangesForItem(highlightedSession, item.name);
+    const highlighted = Boolean(changes.entity || changes.observations.length || changes.relations.length);
+    return `<button class="memory-row ${item.pinned ? 'is-pinned' : ''} ${highlighted ? 'is-sync-highlight' : ''}" type="button" data-memory-item="${encoded(item.name)}">
+      <span class="memory-symbol fluent-icon" aria-hidden="true">${item.pinned ? '\uE718' : '\uE8F1'}</span>
+      <span class="memory-primary"><span><strong>${escapeHtml(item.name)}</strong><em>${escapeHtml(item.entityType)}</em>${highlighted ? '<b>Added in this sync</b>' : ''}</span><small>${escapeHtml(preview)}</small></span>
+      <span class="memory-summary">${item.observations.length} note${item.observations.length === 1 ? '' : 's'} · ${item.relations.length} link${item.relations.length === 1 ? '' : 's'}${updatedAt ? ` · ${escapeHtml(relativeTime(updatedAt))}` : ''}</span>
+      <span class="row-chevron fluent-icon" aria-hidden="true">&#xE76C;</span>
+    </button>`;
+  }).join('');
+}
+
+function filteredMemoryItems() {
+  const items = memoryModel?.items || [];
+  const query = memoryQuery.trim().toLocaleLowerCase();
+  if (!query) return items;
+  return items.filter((item) => [
+    item.name,
+    item.entityType,
+    ...item.observations.map((observation) => observation.text),
+    ...item.relations.flatMap((relation) => [relation.from, relation.to, relation.relationType]),
+  ].some((value) => String(value || '').toLocaleLowerCase().includes(query)));
+}
+
+function renderMemory() {
+  currentDiff = null;
+  if (!memoryModel) {
+    main.innerHTML = '<div class="memory-loading"><span class="checkpoint-impact-spinner" aria-hidden="true"></span>Loading the shared graph…</div>';
+    renderInspectorEmpty('Select a memory item to inspect it.');
+    return;
+  }
+  if (memoryModel.error) {
+    main.innerHTML = emptyPanel('\uE783', 'Shared memory could not be read', memoryModel.error,
+      '<button class="button button-secondary" type="button" data-action="reload-memory">Try again</button>');
+    renderInspectorEmpty('Shared memory is unavailable.');
+    return;
+  }
+  const summary = memoryModel.summary;
+  const items = filteredMemoryItems();
+  const highlightedSession = sessionById(memoryHighlightSessionId);
+  const highlightedPeer = highlightedSession ? peerById(highlightedSession.peerId) : null;
+  const latestSession = latestMemorySession();
+  if (!selectedMemorySnapshot && !memoryItemByName(selectedMemoryName)) {
+    selectedMemoryName = items[0]?.name || memoryModel.items[0]?.name || null;
+  }
+  main.innerHTML = `<div class="memory-toolbar">
+      <label class="memory-search">
+        <span class="fluent-icon" aria-hidden="true">&#xE721;</span>
+        <span class="visually-hidden">Search shared memory</span>
+        <input id="memory-search" type="search" value="${escapeHtml(memoryQuery)}" placeholder="Search names, notes, and links" autocomplete="off">
+      </label>
+      <span class="toolbar-spacer"></span>
+      ${!highlightedSession && latestSession
+        ? '<button class="button button-quiet memory-latest-sync" type="button" data-action="review-latest-memory-sync">Review latest sync additions</button>'
+        : ''}
+      <span class="badge">${summary.entities} items · ${summary.relations} graph links</span>
+    </div>
+    ${highlightedSession ? `<div class="memory-review-bar">
+      <span class="fluent-icon" aria-hidden="true">&#xE895;</span>
+      <div><strong>Reviewing additions from ${escapeHtml(highlightedPeer?.name || 'a paired device')}</strong><span>${escapeHtml(formatDate(highlightedSession.completedAt || highlightedSession.startedAt, true))}. Matching items and details are highlighted.</span></div>
+      <button class="button button-quiet" type="button" data-action="clear-memory-highlight">Clear review</button>
+    </div>` : ''}
+    <div class="memory-ledger-note">
+      <span class="fluent-icon" aria-hidden="true">&#xE946;</span>
+      <div><strong>This is agent context, not activity history</strong><span>Edit the facts agents can reuse here. Sync sessions and recovery checkpoints remain in their own audit views.</span></div>
+    </div>
+    <div class="list-panel memory-list">${memoryRows(items)}</div>`;
+  renderInspector();
+}
+
+async function loadMemory(options) {
+  options = options || {};
+  const requestId = ++memoryRequestId;
+  if (!memoryModel && activeView === 'memory') renderMemory();
+  try {
+    const loaded = await api('/api/memory');
+    if (requestId !== memoryRequestId) return;
+    memoryModel = loaded;
+    if (model) model.memory = loaded.summary;
+    if (options.selectName) selectedMemoryName = options.selectName;
+    if (options.snapshot) selectedMemorySnapshot = options.snapshot;
+    if (activeView === 'memory') renderView();
+    else renderTopChrome();
+  } catch (error) {
+    if (requestId !== memoryRequestId) return;
+    memoryModel = { error: error.message, summary: model?.memory || {}, items: [] };
+    if (activeView === 'memory') renderMemory();
+    if (!options.silent) showToast(error.message, 'error');
+  }
+}
+
+async function openMemoryItem(name, snapshot, options) {
+  options = options || {};
+  activeView = 'memory';
+  selectedMemoryName = name;
+  selectedMemorySnapshot = snapshot || null;
+  memoryHighlightSessionId = options.highlightSessionId || null;
+  syncNav();
+  if (!memoryModel || memoryModel.summary?.revision !== model?.memory?.revision) {
+    await loadMemory({ selectName: name, snapshot });
+  }
+  else renderView();
+}
+
+function renderMemoryLinkList(names, sourceLabel) {
+  const unique = [...new Set(names || [])];
+  if (!unique.length) return '';
+  const visible = unique.slice(0, 50);
+  const remainder = unique.length - visible.length;
+  return `<section class="memory-links" aria-label="Linked shared memory">
+    <div class="section-heading"><h2>Shared memory</h2><p>${escapeHtml(sourceLabel)}</p></div>
+    <div class="memory-link-list">${visible.map((name) =>
+      `<button class="memory-link" type="button" data-memory-link="${encoded(name)}"><span class="fluent-icon" aria-hidden="true">&#xE8F1;</span><span>${escapeHtml(name)}</span><span class="fluent-icon" aria-hidden="true">&#xE76C;</span></button>`).join('')}
+      ${remainder ? `<button class="memory-link" type="button" data-view-jump="memory"><span class="fluent-icon" aria-hidden="true">&#xE8F1;</span><span>${remainder} more memory item${remainder === 1 ? '' : 's'}</span><span class="fluent-icon" aria-hidden="true">&#xE76C;</span></button>` : ''}
+    </div>
+  </section>`;
+}
+
+function renderSessionMemoryChanges(session, peer) {
+  const memory = session?.memory;
+  if (!memory || memory.status !== 'changed' || sessionMemoryAdditionCount(session) === 0) return '';
+  const entities = memory.entities || [];
+  const observations = memory.observations || [];
+  const relations = memory.relations || [];
+  const hasExactRecords = entities.length || observations.length || relations.length;
+  if (!hasExactRecords) {
+    return renderMemoryLinkList(
+      memory.entityNames,
+      `${memory.addedEntities || 0} items · ${memory.addedObservations || 0} observations · from ${peer ? peer.name : 'paired device'}`,
+    );
+  }
+  const sessionAttr = encoded(session.sessionId);
+  const entityRows = entities.map((item) => `<button class="memory-sync-change entity-change" type="button" data-memory-link="${encoded(item.name)}" data-memory-session="${sessionAttr}">
+    <span class="memory-change-symbol fluent-icon" aria-hidden="true">&#xE8F1;</span>
+    <span class="memory-change-copy"><strong>${escapeHtml(item.name)}</strong><span>New ${escapeHtml(item.entityType || 'entity')} item</span></span>
+    <span class="memory-change-kind">Item</span>
+    <span class="row-chevron fluent-icon" aria-hidden="true">&#xE76C;</span>
+  </button>`).join('');
+  const observationRows = observations.map((item) => `<button class="memory-sync-change observation-change" type="button" data-memory-link="${encoded(item.name)}" data-memory-session="${sessionAttr}">
+    <span class="memory-change-symbol" aria-hidden="true">+</span>
+    <span class="memory-change-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.text)}</span></span>
+    <span class="memory-change-kind">Observation</span>
+    <span class="row-chevron fluent-icon" aria-hidden="true">&#xE76C;</span>
+  </button>`).join('');
+  const relationRows = relations.map((item) => `<button class="memory-sync-change relation-change" type="button" data-memory-link="${encoded(item.from)}" data-memory-session="${sessionAttr}">
+    <span class="memory-change-symbol fluent-icon" aria-hidden="true">&#xE71B;</span>
+    <span class="memory-change-copy"><strong>${escapeHtml(item.from)}</strong><span>${escapeHtml(item.relationType)} &rarr; ${escapeHtml(item.to)}</span></span>
+    <span class="memory-change-kind">Relationship</span>
+    <span class="row-chevron fluent-icon" aria-hidden="true">&#xE76C;</span>
+  </button>`).join('');
+  const recordedCount = entities.length + observations.length + relations.length;
+  const totalCount = sessionMemoryAdditionCount(session);
+  return `<section class="memory-sync-changes" aria-label="Shared memory added in this sync">
+    <div class="section-heading"><h2>Memory added in this sync</h2><p>${totalCount} addition${totalCount === 1 ? '' : 's'} from ${escapeHtml(peer?.name || 'a paired device')}</p></div>
+    <div class="memory-sync-change-list">${entityRows}${observationRows}${relationRows}</div>
+    ${memory.recordsTruncated || recordedCount < totalCount
+      ? '<p class="memory-sync-truncated">This unusually large sync has more memory additions. Open the affected items to review the complete current graph.</p>'
+      : ''}
+  </section>`;
+}
+
 function checkpointKind(checkpoint) {
   if (checkpoint.kind === 'automatic') return 'Before sync';
   if (checkpoint.kind === 'restore-safety') return 'Restore safety';
@@ -578,6 +833,32 @@ function checkpointChangePresentation(action) {
   if (action === 'restore') return { className: 'added', symbol: '+', label: 'Restore' };
   if (action === 'replace') return { className: 'modified', symbol: 'M', label: 'Replace' };
   return { className: 'deleted', symbol: '−', label: 'Delete' };
+}
+
+function checkpointMemorySummary(counts) {
+  if (!counts || !counts.total) return 'No shared memory would change';
+  const parts = [];
+  if (counts.restore) parts.push(`${counts.restore} restored`);
+  if (counts.replace) parts.push(`${counts.replace} reverted`);
+  if (counts.delete) parts.push(`${counts.delete} removed`);
+  return `${counts.total} item${counts.total === 1 ? '' : 's'} will change · ${parts.join(' · ')}`;
+}
+
+function renderCheckpointMemoryImpact(preview) {
+  if (preview.status !== 'ready' || !preview.memoryCounts?.total) return '';
+  return `<section class="checkpoint-impact checkpoint-memory-impact" aria-label="Shared memory affected by restore">
+    <div class="checkpoint-impact-header"><div><h3>Shared memory</h3><p>${escapeHtml(checkpointMemorySummary(preview.memoryCounts))}</p></div></div>
+    <div class="checkpoint-impact-list" role="list">${preview.memoryChanges.map((change) => {
+      const presentation = checkpointChangePresentation(change.action);
+      const version = change.action === 'delete' ? 'current' : 'checkpoint';
+      const label = change.action === 'delete' ? 'Will be removed' : change.action === 'restore' ? 'Will be restored' : 'Will revert';
+      return `<button class="checkpoint-impact-row checkpoint-memory-row" type="button" role="listitem" data-memory-link="${encoded(change.name)}" data-memory-version="${version}">
+        <span class="file-action ${presentation.className}">${presentation.symbol}</span>
+        <span class="checkpoint-impact-path" title="${escapeHtml(change.name)}">${escapeHtml(change.name)}</span>
+        <span class="checkpoint-impact-action">${label}</span>
+      </button>`;
+    }).join('')}</div>
+  </section>`;
 }
 
 function renderCheckpointImpact(checkpointId) {
@@ -609,7 +890,8 @@ function renderCheckpointImpact(checkpointId) {
       <button class="checkpoint-impact-refresh fluent-icon" type="button" data-action="refresh-checkpoint-preview" data-checkpoint-id="${encoded(checkpointId)}" aria-label="Refresh affected files" title="Refresh affected files">&#xE72C;</button>
     </div>
     ${body}
-  </section>`;
+  </section>
+  ${renderCheckpointMemoryImpact(preview)}`;
 }
 
 async function loadCheckpointPreview(checkpointId) {
@@ -633,7 +915,7 @@ function renderCheckpointRows(items) {
   return items.map((checkpoint) => `<button class="checkpoint-row" type="button" data-checkpoint="${encoded(checkpoint.checkpointId)}">
     <span class="checkpoint-symbol fluent-icon" aria-hidden="true">&#xE823;</span>
     <span class="checkpoint-primary"><strong>${escapeHtml(checkpoint.name)}</strong><span>${escapeHtml(relativeTime(checkpoint.createdAt))} · ${escapeHtml(checkpointKind(checkpoint))}</span></span>
-    <span class="checkpoint-summary">${checkpoint.fileCount} file${checkpoint.fileCount === 1 ? '' : 's'} · ${escapeHtml(formatBytes(checkpoint.totalBytes))}</span>
+    <span class="checkpoint-summary">${checkpoint.projectFileCount ?? checkpoint.fileCount} file${(checkpoint.projectFileCount ?? checkpoint.fileCount) === 1 ? '' : 's'}${checkpoint.memoryIncluded ? ' · memory' : ''}</span>
     <span class="row-chevron fluent-icon" aria-hidden="true">&#xE76C;</span>
   </button>`).join('');
 }
@@ -797,12 +1079,82 @@ function renderPeerInspector(peer) {
   </div>`;
 }
 
+function renderMemoryInspector() {
+  const snapshot = selectedMemorySnapshot;
+  const currentItem = memoryItemByName(selectedMemoryName);
+  const item = snapshot?.item || currentItem;
+  if (!item) return renderInspectorEmpty('Select a memory item to inspect, edit, pin, or delete it.');
+  const observations = (item.observations || []).map((observation) =>
+    typeof observation === 'string' ? { text: observation } : observation);
+  const relations = item.relations || [];
+  const lastUpdated = memoryUpdatedAt({ observations });
+  const latestObservation = observations.at(-1);
+  const busy = model.job && model.job.status === 'running';
+  const highlightedSession = snapshot ? null : sessionById(memoryHighlightSessionId);
+  const highlightedPeer = highlightedSession ? peerById(highlightedSession.peerId) : null;
+  const highlightedChanges = memoryChangesForItem(highlightedSession, item.name);
+  const itemHighlighted = Boolean(
+    highlightedChanges.entity || highlightedChanges.observations.length || highlightedChanges.relations.length);
+  const highlightedObservations = new Set(highlightedChanges.observations.map((change) => change.text));
+  const highlightedRelations = new Set(highlightedChanges.relations.map((change) =>
+    `${change.from}\u0000${change.to}\u0000${change.relationType}`));
+  const observationRows = observations.map((observation) => {
+    const highlighted = highlightedObservations.has(observation.text);
+    return `<article class="memory-observation ${highlighted ? 'is-sync-highlight' : ''}">
+    <p>${escapeHtml(observation.text)}</p>
+    <div class="memory-observation-meta"><span>${escapeHtml(memorySourceLabel(observation))}</span>${highlighted ? '<b>Added in this sync</b>' : ''}</div>
+  </article>`;
+  }).join('');
+  const relationRows = relations.map((relation) => {
+    const targetName = relation.from === item.name ? relation.to : relation.from;
+    const highlighted = highlightedRelations.has(`${relation.from}\u0000${relation.to}\u0000${relation.relationType}`);
+    return `<button class="memory-relation ${highlighted ? 'is-sync-highlight' : ''}" type="button" data-memory-link="${encoded(targetName)}"${highlightedSession ? ` data-memory-session="${encoded(highlightedSession.sessionId)}"` : ''}>
+      <span class="fluent-icon" aria-hidden="true">&#xE71B;</span>
+      <span class="memory-relation-copy"><span>${escapeHtml(memoryRelationLabel(relation, item.name))}</span>${highlighted ? '<b>Added in this sync</b>' : ''}</span>
+      <span class="fluent-icon" aria-hidden="true">&#xE76C;</span>
+    </button>`;
+  }).join('');
+  const snapshotActions = snapshot
+    ? `${currentItem
+      ? `<button class="button button-secondary inspector-sync" type="button" data-memory-link="${encoded(item.name)}">Open current item</button>`
+      : '<p class="memory-snapshot-note">This item exists only inside the selected checkpoint.</p>'}`
+    : `<div class="memory-inspector-actions">
+        <button class="button button-secondary" type="button" data-action="pin-memory" data-memory-name="${encoded(item.name)}"><span class="fluent-icon" aria-hidden="true">&#xE718;</span>${item.pinned ? 'Unpin item' : 'Pin on this device'}</button>
+        <button class="button button-primary" type="button" data-action="edit-memory" data-memory-name="${encoded(item.name)}" ${busy ? 'disabled' : ''}>Edit item</button>
+      </div>
+      <button class="button button-danger inspector-disconnect" type="button" data-action="delete-memory" data-memory-name="${encoded(item.name)}" ${busy ? 'disabled' : ''}>Delete memory item</button>`;
+  inspector.innerHTML = `<div class="inspector-content memory-inspector">
+    <p class="inspector-kicker">${snapshot ? escapeHtml(snapshot.label) : item.pinned ? 'Pinned on this device' : 'Shared memory'}</p>
+    <h2 class="memory-inspector-name">${escapeHtml(item.name)}</h2>
+    <p>${snapshot ? 'A read-only version linked from the selected recovery checkpoint.' : 'Durable project context available to connected coding agents.'}</p>
+    ${itemHighlighted ? `<div class="memory-sync-context">
+      <span class="fluent-icon" aria-hidden="true">&#xE895;</span>
+      <div><strong>${highlightedChanges.entity ? 'Item added' : 'Context added'} in this sync</strong><span>From ${escapeHtml(highlightedPeer?.name || 'a paired device')} ${escapeHtml(relativeTime(highlightedSession.completedAt || highlightedSession.startedAt))}</span></div>
+      <button class="button button-quiet" type="button" data-action="clear-memory-highlight">Clear</button>
+    </div>` : ''}
+    <div class="memory-inspector-mark fluent-icon" aria-hidden="true">${item.pinned ? '\uE718' : '\uE8F1'}</div>
+    <dl class="details-list">
+      <div class="detail-item"><dt>Type</dt><dd>${escapeHtml(item.entityType || 'entity')}</dd></div>
+      <div class="detail-item"><dt>Observations</dt><dd>${observations.length}</dd></div>
+      <div class="detail-item"><dt>Graph links</dt><dd>${relations.length}</dd></div>
+      <div class="detail-item"><dt>Last context</dt><dd>${lastUpdated ? escapeHtml(formatDate(lastUpdated, true)) : 'Not recorded'}</dd></div>
+      <div class="detail-item"><dt>Latest source</dt><dd>${escapeHtml(memorySourceLabel(latestObservation))}</dd></div>
+    </dl>
+    <div class="section-heading memory-section-heading"><h2>Observations</h2><p>What agents can reuse</p></div>
+    <div class="memory-observation-list">${observationRows || '<p class="memory-snapshot-note">No observations are stored on this item.</p>'}</div>
+    ${relationRows ? `<div class="section-heading memory-section-heading"><h2>Relations</h2><p>Connected context</p></div><div class="memory-relation-list">${relationRows}</div>` : ''}
+    ${snapshotActions}
+  </div>`;
+}
+
 function renderInspector() {
   if (!model || !model.project) return renderInspectorEmpty('Choose an item to inspect it.');
+  if (activeView === 'memory') return renderMemoryInspector();
   if (activeView === 'checkpoints') {
     const checkpoint = (model.checkpoints || []).find((item) => item.checkpointId === selectedCheckpointId);
     if (!checkpoint) return renderInspectorEmpty('Select a checkpoint to inspect or restore it.');
     const busy = model.job && model.job.status === 'running';
+    const checkpointPeer = checkpoint.sourcePeerId ? peerById(checkpoint.sourcePeerId) : null;
     inspector.innerHTML = `<div class="inspector-content">
       <p class="inspector-kicker">${escapeHtml(checkpointKind(checkpoint))}</p>
       <h2>${escapeHtml(checkpoint.name)}</h2>
@@ -810,8 +1162,14 @@ function renderInspector() {
       <div class="checkpoint-inspector-icon fluent-icon" aria-hidden="true">&#xE823;</div>
       <dl class="details-list">
         <div class="detail-item"><dt>Created</dt><dd>${escapeHtml(formatDate(checkpoint.createdAt, true))}</dd></div>
-        <div class="detail-item"><dt>Files</dt><dd>${checkpoint.fileCount}</dd></div>
-        <div class="detail-item"><dt>Project size</dt><dd>${escapeHtml(formatBytes(checkpoint.totalBytes))}</dd></div>
+        <div class="detail-item"><dt>Source</dt><dd>${checkpoint.sourcePeerId ? `Before changes from ${escapeHtml(checkpointPeer?.name || 'paired device')}` : 'Created on this device'}</dd></div>
+        <div class="detail-item"><dt>Project files</dt><dd>${checkpoint.projectFileCount ?? checkpoint.fileCount}</dd></div>
+        <div class="detail-item"><dt>Project size</dt><dd>${escapeHtml(formatBytes(checkpoint.projectBytes ?? checkpoint.totalBytes))}</dd></div>
+        <div class="detail-item"><dt>Shared memory</dt><dd>${checkpoint.memoryIncluded
+          ? checkpoint.memoryItemCount
+            ? `${checkpoint.memoryItemCount} linked item${checkpoint.memoryItemCount === 1 ? '' : 's'}`
+            : 'Included'
+          : 'Not included'}</dd></div>
         <div class="detail-item"><dt>Storage</dt><dd>Deduplicated locally</dd></div>
       </dl>
       ${renderCheckpointImpact(checkpoint.checkpointId)}
@@ -845,6 +1203,7 @@ function renderInspector() {
     </dl>
     <div class="section-heading"><h2>Project actions</h2></div>
     <div class="action-list">${actionRows || emptyPanel('\uE73E', 'No project changes', 'Both devices already matched.', '')}</div>
+    ${renderSessionMemoryChanges(session, peer)}
   </div>`;
 }
 
@@ -983,6 +1342,7 @@ function renderView() {
   if (!model.folder) renderFolderOnboarding();
   else if (!model.project) renderUninitialized();
   else if (activeView === 'activity') renderActivity();
+  else if (activeView === 'memory') renderMemory();
   else if (activeView === 'checkpoints') renderCheckpoints();
   else if (activeView === 'conflicts') renderConflicts();
   else if (activeView === 'devices') renderDevices();
@@ -1046,12 +1406,22 @@ async function refresh(options) {
   refreshInFlight = true;
   try {
     const nextModel = await api('/api/state');
+    const previousRoot = model?.folder?.root || null;
+    const memoryRevisionChanged = memoryModel && nextModel.memory?.revision !== memoryModel.summary?.revision;
     const changed = !model || modelFingerprint(nextModel) !== renderedStateFingerprint;
     model = nextModel;
+    if (previousRoot && previousRoot !== nextModel.folder?.root) {
+      memoryModel = null;
+      selectedMemoryName = null;
+      selectedMemorySnapshot = null;
+    }
     shell.setAttribute('aria-busy', 'false');
     if (changed) {
       renderView();
       renderRemoteSession();
+    }
+    if (activeView === 'memory' && (!memoryModel || memoryRevisionChanged)) {
+      loadMemory({ silent: true });
     }
   } catch (err) {
     if (!options || !options.silent) showToast(err.message, 'error');
@@ -1114,6 +1484,9 @@ async function chooseFolder() {
   try {
     model = await api('/api/select-folder', { method: 'POST' });
     selectedSessionId = null;
+    memoryModel = null;
+    selectedMemoryName = null;
+    selectedMemorySnapshot = null;
     currentDiff = null;
     activeView = 'overview';
     syncNav();
@@ -1247,21 +1620,48 @@ function syncNav() {
   }
 }
 
+function adoptMemory(nextMemory) {
+  memoryModel = nextMemory;
+  if (model) model.memory = nextMemory.summary;
+  renderTopChrome();
+}
+
+function showMemoryEditor(item) {
+  if (!item) return;
+  document.getElementById('memory-original-name').value = item.name;
+  document.getElementById('memory-item-name').value = item.name;
+  document.getElementById('memory-item-type').value = item.entityType || 'entity';
+  document.getElementById('memory-item-observations').value = item.observations
+    .map((observation) => observation.text).join('\n');
+  const dialog = document.getElementById('memory-edit-dialog');
+  dialog.showModal();
+  document.getElementById('memory-item-name').focus();
+}
+
 document.addEventListener('click', async (event) => {
   const nav = event.target.closest('[data-view]');
   if (nav) {
     activeView = nav.dataset.view;
     currentDiff = null;
+    if (activeView === 'memory') {
+      selectedMemorySnapshot = null;
+      memoryHighlightSessionId = null;
+    }
     syncNav();
     renderView();
+    if (activeView === 'memory' && (!memoryModel || memoryModel.summary?.revision !== model.memory?.revision)) {
+      await loadMemory({ silent: true });
+    }
     return;
   }
   const jump = event.target.closest('[data-view-jump]');
   if (jump) {
     activeView = jump.dataset.viewJump;
     currentDiff = null;
+    if (activeView === 'memory') memoryHighlightSessionId = null;
     syncNav();
     renderView();
+    if (activeView === 'memory' && !memoryModel) await loadMemory({ silent: true });
     return;
   }
   const sessionButton = event.target.closest('[data-session]');
@@ -1275,6 +1675,28 @@ document.addEventListener('click', async (event) => {
     selectedCheckpointId = decodeURIComponent(checkpointButton.dataset.checkpoint);
     checkpointPreview = null;
     await loadCheckpointPreview(selectedCheckpointId);
+    return;
+  }
+  const memoryItemButton = event.target.closest('[data-memory-item]');
+  if (memoryItemButton) {
+    selectedMemoryName = decodeURIComponent(memoryItemButton.dataset.memoryItem);
+    selectedMemorySnapshot = null;
+    renderInspector();
+    return;
+  }
+  const memoryLink = event.target.closest('[data-memory-link]');
+  if (memoryLink) {
+    const name = decodeURIComponent(memoryLink.dataset.memoryLink);
+    const linkedSessionId = memoryLink.dataset.memorySession
+      ? decodeURIComponent(memoryLink.dataset.memorySession)
+      : (activeView === 'memory' ? memoryHighlightSessionId : null);
+    let snapshot = null;
+    if (memoryLink.dataset.memoryVersion && checkpointPreview?.memoryChanges) {
+      const change = checkpointPreview.memoryChanges.find((item) => item.name === name);
+      const item = memoryLink.dataset.memoryVersion === 'checkpoint' ? change?.checkpoint : change?.current;
+      if (item) snapshot = { item, label: memoryLink.dataset.memoryVersion === 'checkpoint' ? 'Checkpoint version' : 'Current version before restore' };
+    }
+    await openMemoryItem(name, snapshot, { highlightSessionId: snapshot ? null : linkedSessionId });
     return;
   }
   const conflictButton = event.target.closest('[data-conflict-session]');
@@ -1313,6 +1735,63 @@ document.addEventListener('click', async (event) => {
     input.value = '';
     document.getElementById('checkpoint-dialog').showModal();
     input.focus();
+  }
+  else if (action === 'reload-memory') {
+    memoryModel = null;
+    await loadMemory();
+  }
+  else if (action === 'review-latest-memory-sync') {
+    const session = latestMemorySession();
+    if (!session) return;
+    memoryHighlightSessionId = session.sessionId;
+    const firstChangedName = (session.memory.entityNames || []).find((name) => memoryItemByName(name));
+    if (firstChangedName) selectedMemoryName = firstChangedName;
+    selectedMemorySnapshot = null;
+    renderMemory();
+  }
+  else if (action === 'clear-memory-highlight') {
+    memoryHighlightSessionId = null;
+    renderMemory();
+  }
+  else if (action === 'edit-memory') {
+    showMemoryEditor(memoryItemByName(decodeURIComponent(target.dataset.memoryName || '')));
+  }
+  else if (action === 'pin-memory') {
+    const name = decodeURIComponent(target.dataset.memoryName || '');
+    const item = memoryItemByName(name);
+    if (!item) return;
+    target.disabled = true;
+    try {
+      const response = await api('/api/memory/pin', { method: 'POST', body: { name, pinned: !item.pinned } });
+      adoptMemory(response.memory);
+      renderMemory();
+      showToast(item.pinned ? 'Memory item unpinned.' : 'Memory item pinned on this device.', 'success');
+    } catch (error) {
+      target.disabled = false;
+      showToast(error.message, 'error');
+    }
+  }
+  else if (action === 'delete-memory') {
+    const name = decodeURIComponent(target.dataset.memoryName || '');
+    const item = memoryItemByName(name);
+    if (!item || !await askForConfirmation({
+      title: `Delete “${item.name}”?`,
+      message: `This removes the item and its ${item.relations.length} graph link${item.relations.length === 1 ? '' : 's'} from this device. If another device still has the item, union sync can add it back.`,
+      confirmLabel: 'Delete memory item',
+      tone: 'danger',
+    })) return;
+    target.disabled = true;
+    try {
+      const response = await api('/api/memory/delete', { method: 'POST', body: { name } });
+      adoptMemory(response.memory);
+      selectedMemoryName = response.memory.items[0]?.name || null;
+      selectedMemorySnapshot = null;
+      renderMemory();
+      showToast('Memory item deleted from this device.', 'success');
+    } catch (error) {
+      target.disabled = false;
+      showToast(error.message, 'error');
+    }
   }
   else if (action === 'refresh-checkpoint-preview') {
     await loadCheckpointPreview(decodeURIComponent(target.dataset.checkpointId || ''));
@@ -1538,6 +2017,13 @@ document.addEventListener('change', async (event) => {
   }
 });
 
+document.addEventListener('input', (event) => {
+  if (event.target.id !== 'memory-search') return;
+  memoryQuery = event.target.value;
+  const list = document.querySelector('.memory-list');
+  if (list) list.innerHTML = memoryRows(filteredMemoryItems());
+});
+
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
   const conflict = event.target.closest('[role="button"][data-conflict-session]');
@@ -1628,6 +2114,33 @@ document.getElementById('sync-form').addEventListener('submit', async (event) =>
     await startSync(peerId, direction, direct);
   } catch (err) {
     showToast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById('memory-edit-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const originalName = document.getElementById('memory-original-name').value;
+  const name = document.getElementById('memory-item-name').value.trim();
+  const entityType = document.getElementById('memory-item-type').value.trim();
+  const observations = document.getElementById('memory-item-observations').value
+    .split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  const button = document.getElementById('memory-save-button');
+  button.disabled = true;
+  try {
+    const nextMemory = await api('/api/memory/update', {
+      method: 'POST',
+      body: { originalName, name, entityType, observations },
+    });
+    adoptMemory(nextMemory);
+    selectedMemoryName = name;
+    selectedMemorySnapshot = null;
+    document.getElementById('memory-edit-dialog').close();
+    renderMemory();
+    showToast('Memory item updated.', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
   } finally {
     button.disabled = false;
   }
@@ -1753,6 +2266,9 @@ document.getElementById('path-form').addEventListener('submit', async (event) =>
     document.getElementById('path-dialog').close();
     activeView = 'overview';
     selectedSessionId = null;
+    memoryModel = null;
+    selectedMemoryName = null;
+    selectedMemorySnapshot = null;
     currentDiff = null;
     syncNav();
     renderView();

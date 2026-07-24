@@ -1,6 +1,6 @@
 {
   "name": "carry",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "description": "End-to-end encrypted project-folder and agent-memory sync over LAN or a relay.",
   "bin": {

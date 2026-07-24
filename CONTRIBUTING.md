@@ -26,8 +26,8 @@ GitHub assets, not through the npm registry.
 - Add a regression test for bug fixes and security boundaries.
 - Do not weaken authentication, integrity checks, path validation, or resource
   limits to make a test pass.
-- Do not commit `.carry`, `.shared-memory`, logs, build output, real invitations,
-  device identifiers, or project data.
+- Do not commit legacy `.carry` data, `.shared-memory`, logs, build output, real
+  invitations, device identifiers, or project data.
 - Discuss new production dependencies before adding them.
 
 By contributing, you agree that your contribution is licensed under the MIT

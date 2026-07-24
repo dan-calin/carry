@@ -4,7 +4,7 @@ import { DurableObject } from 'cloudflare:workers';
 // the room join. Every application frame forwarded afterwards is already
 // authenticated and encrypted by the two desktop clients.
 
-const ROOM_PATTERN = /^[A-Z0-9]{6,64}$/;
+const ROOM_PATTERN = /^[A-F0-9]{64}$/;
 const DEVICE_PATTERN = /^[A-Za-z0-9_-]{6,128}$/;
 const SYNC_RUN_PATTERN = /^[a-f0-9]{24}$/;
 const BINARY_RELAY_FEATURE = 'encrypted-binary-v2';
@@ -13,6 +13,7 @@ const BINARY_FLAGS_OFFSET = 4;
 const MIN_BINARY_ENVELOPE_BYTES = 49;
 const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 const ROOM_WAIT_MS = 10 * 60 * 1000;
+const PREAUTH_WAIT_MS = 15 * 1000;
 const CONNECTIONS_PER_SOURCE_PER_MINUTE = 120;
 
 function json(value, status = 200, headers = {}) {
@@ -158,6 +159,10 @@ export class CarryRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.ctx = ctx;
+    const configured = Number(env && env.CARRY_PREAUTH_WAIT_MS);
+    this.preauthWaitMs = Number.isFinite(configured) && configured >= 50 && configured <= 60000
+      ? Math.floor(configured)
+      : PREAUTH_WAIT_MS;
   }
 
   sockets(except) {
@@ -176,6 +181,14 @@ export class CarryRoom extends DurableObject {
     try { socket.close(closeCode, String(message).slice(0, 120)); } catch { /* already closed */ }
   }
 
+  async scheduleAlarm() {
+    const deadlines = this.sockets()
+      .map((socket) => Number(socket.deserializeAttachment()?.expiresAt))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    if (deadlines.length) await this.ctx.storage.setAlarm(Math.trunc(Math.min(...deadlines)));
+    else await this.ctx.storage.deleteAlarm();
+  }
+
   async fetch(request) {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return json({ error: 'websocket upgrade required' }, 426, { Upgrade: 'websocket' });
@@ -187,12 +200,25 @@ export class CarryRoom extends DurableObject {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
+    const connectedAt = Date.now();
     server.serializeAttachment({
       joined: false,
       room: room.room,
       syncRunId: room.syncRunId,
-      connectedAt: Date.now(),
+      connectedAt,
+      expiresAt: connectedAt + this.preauthWaitMs,
     });
+    // The accepted server socket may still report CONNECTING until the 101
+    // response is returned, so schedule directly instead of filtering it via
+    // getWebSockets() here.
+    const existingAlarm = await this.ctx.storage.getAlarm();
+    const preauthAlarm = connectedAt + this.preauthWaitMs;
+    const existingTime = existingAlarm instanceof Date ? existingAlarm.getTime() : Number(existingAlarm);
+    const alarmTime = Number.isFinite(existingTime) && existingTime > 0
+      ? Math.min(existingTime, preauthAlarm)
+      : preauthAlarm;
+    if (!Number.isSafeInteger(alarmTime)) throw new Error('relay pre-authentication alarm timestamp is invalid');
+    await this.ctx.storage.setAlarm(alarmTime);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -218,16 +244,20 @@ export class CarryRoom extends DurableObject {
         this.fail(socket, 'room full or duplicate device');
         return;
       }
-      socket.serializeAttachment({ ...attachment, ...member, joined: true });
+      socket.serializeAttachment({
+        ...attachment, ...member, joined: true,
+        expiresAt: peers.length ? null : Date.now() + ROOM_WAIT_MS,
+      });
       if (!peers.length) {
-        await this.ctx.storage.setAlarm(Date.now() + ROOM_WAIT_MS);
+        await this.scheduleAlarm();
         sendControl(socket, { type: 'relay-wait', room: member.room, message: 'waiting for peer to join' });
         return;
       }
 
-      await this.ctx.storage.deleteAlarm();
       const peer = peers[0];
       const peerMember = peer.deserializeAttachment();
+      peer.serializeAttachment({ ...peerMember, expiresAt: null });
+      await this.scheduleAlarm();
       const features = member.features.includes(BINARY_RELAY_FEATURE) &&
         peerMember.features.includes(BINARY_RELAY_FEATURE)
         ? [BINARY_RELAY_FEATURE]
@@ -275,7 +305,10 @@ export class CarryRoom extends DurableObject {
     const attachment = socket.deserializeAttachment();
     // A socket that disconnects before a valid join never owned the room and
     // must not be allowed to evict an already joined peer.
-    if (!attachment || !attachment.joined) return;
+    if (!attachment || !attachment.joined) {
+      await this.scheduleAlarm();
+      return;
+    }
     const peers = this.sockets(socket);
     await this.ctx.storage.deleteAlarm();
     for (const peer of peers) {
@@ -297,11 +330,14 @@ export class CarryRoom extends DurableObject {
   }
 
   async alarm() {
-    const sockets = this.sockets();
-    const joined = sockets.filter((socket) => socket.deserializeAttachment()?.joined);
-    if (joined.length >= 2) return;
-    for (const socket of sockets) {
-      this.fail(socket, 'relay room expired waiting for peer', 1008);
+    const now = Date.now();
+    for (const socket of this.sockets()) {
+      const attachment = socket.deserializeAttachment();
+      if (!attachment || !Number.isFinite(Number(attachment.expiresAt)) || Number(attachment.expiresAt) > now) continue;
+      this.fail(socket, attachment.joined
+        ? 'relay room expired waiting for peer'
+        : 'relay connection expired before authentication', 1008);
     }
+    await this.scheduleAlarm();
   }
 }

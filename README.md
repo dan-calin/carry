@@ -154,6 +154,27 @@ Each device controls its own trust list. If both sides disconnected each
 other, both sides need to reconnect. If either side forgot the relationship,
 the devices need to pair again.
 
+## Review shared agent memory
+
+The **Memory** view keeps durable agent context separate from sync activity and
+recovery history. Search the graph, select an item to inspect its observations,
+source, and relations, then edit, pin, or delete it. Edits and deletions update
+the standard `.shared-memory/memory.json` graph; Carry saves the prior graph as
+`memory.json.bak`. Pins and device-of-arrival details are local display metadata
+stored in Carry's private app data.
+
+Shared memory currently converges by union. If you edit or delete something
+that an unsynced device still holds, that older observation or item can return
+on the next sync. Carry shows this warning before an edit or deletion.
+
+Completed sync sessions list the exact memory items, observations, and
+relationships they added. Selecting one opens the current Memory item with
+matching additions highlighted and an **Added in this sync** badge. The Memory
+view also offers **Review latest sync additions** for the newest completed
+memory-changing session. Checkpoint previews separately show project-file and
+shared-memory changes, including which memory items a restore would remove,
+revert, or bring back.
+
 ## Conflicts and recovery
 
 When both devices edit the same file differently, Carry does not silently pick
@@ -162,8 +183,9 @@ You can compare them and choose which version to keep.
 
 The **Checkpoints** view lets you create a named restore point or restore an
 earlier one. Carry also creates automatic checkpoints before an incoming sync
-replaces or deletes files. If applying a multi-file update fails, Carry attempts
-to roll the affected paths back to their pre-sync state.
+replaces project files or changes shared memory. If applying a multi-file
+update fails, Carry attempts to roll the affected paths back to their pre-sync
+state.
 
 Checkpoints are local recovery tools, not Git commits or cloud backups. Keep a
 separate backup for important work.
@@ -177,8 +199,10 @@ separate backup for important work.
   not include them in screenshots, issues, or commits.
 - The relay can observe connection details such as IP addresses, timing, and
   traffic size, but it is not intended to store project files.
-- Local pairing information, checkpoints, and activity history live in the
-  project's `.carry` folder. Carry automatically keeps that folder out of Git.
+- Local pairing information, checkpoints, and activity history live in Carry's
+  private app-data directory (`%LOCALAPPDATA%\Carry` on Windows), outside the
+  selected project. Pairing credentials are encrypted for the current Windows
+  user. Legacy `.carry` state is securely migrated when the project is opened.
 - Shared AI-agent memory may live in `.shared-memory`, which is also ignored by
   this repository.
 

@@ -16,6 +16,7 @@ const net = require('net');
 const path = require('path');
 const { acceptWebSocket, DEFAULT_MAX_MESSAGE_BYTES } = require('../lib/websocket');
 const frameCrypto = require('../lib/crypto');
+const privateState = require('../lib/private-state');
 
 const ROOM_TTL_MS = 10 * 60 * 1000;
 const PREAUTH_TIMEOUT_MS = 15 * 1000;
@@ -67,7 +68,7 @@ function persistAuthorized(manifestPath, deviceId) {
 
 function createRelayHub(opts) {
   opts = opts || {};
-  const manifestPath = opts.manifestPath || path.join(process.cwd(), '.carry', 'manifest.json');
+  const manifestPath = opts.manifestPath || privateState.appFile('relay-manifest.json');
   let allowlist = opts.ignoreAllowlist ? null : loadAllowlist(manifestPath);
   const allowedRooms = opts.allowedRooms
     ? opts.dynamicAllowedRooms && opts.allowedRooms instanceof Set

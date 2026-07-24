@@ -71,8 +71,65 @@ class TestElement {
 
   assert.match(markup, /data-view="devices" aria-label="Devices"/,
     'compact navigation retains accessible names when visible labels collapse');
+  assert.match(markup, /data-view="memory" aria-label="Memory"/,
+    'shared memory has a first-class navigation view separate from activity');
+  assert.match(markup, /id="memory-edit-dialog"/,
+    'shared memory items have a dedicated editor instead of using the activity log');
+  assert.match(source, /\/api\/memory\/(update|delete|pin)/,
+    'memory management actions use explicit graph endpoints');
+  assert.match(source, /checkpoint-memory-impact/,
+    'checkpoint inspection renders shared-memory impact separately from project files');
+  assert.match(source, /data-memory-session/,
+    'activity deep links carry their sync-session context into the memory inspector');
+  assert.match(styles, /\.memory-observation\.is-sync-highlight/,
+    'observations added by a selected sync receive a persistent visual highlight');
   assert.doesNotMatch(styles, /@media \(max-width: 900px\)[\s\S]*?\.inspector\s*\{\s*display:\s*none/,
     'the narrow layout does not hide device and checkpoint actions');
+  assert.match(
+    context.memoryRows([{
+      name: 'demo/decision',
+      entityType: 'decision',
+      pinned: true,
+      observations: [{ text: 'Use Postgres (codex, 2026-07-23 12:00)' }],
+      relations: [],
+    }]),
+    /memory-row is-pinned[\s\S]*data-memory-item="demo%2Fdecision"/,
+    'memory ledger promotes pinned graph items with stable encoded selection keys',
+  );
+  const memorySession = {
+    sessionId: 'sync/recent',
+    status: 'completed',
+    memory: {
+      status: 'changed',
+      addedEntities: 1,
+      addedObservations: 1,
+      addedRelations: 1,
+      entityNames: ['demo/decision', 'demo/database'],
+      entities: [{ name: 'demo/decision', entityType: 'decision' }],
+      observations: [{ name: 'demo/decision', text: 'Use <Postgres> for durable storage' }],
+      relations: [{ from: 'demo/decision', to: 'demo/database', relationType: 'depends-on' }],
+    },
+  };
+  const activityMemory = context.renderSessionMemoryChanges(memorySession, { name: 'Laptop' });
+  assert.match(activityMemory, /Memory added in this sync/,
+    'activity names the exact memory additions section');
+  assert.match(activityMemory, /Use &lt;Postgres&gt; for durable storage/,
+    'activity shows exact observation text with HTML escaping');
+  assert.match(activityMemory, /depends-on &rarr; demo\/database/,
+    'activity shows exact relationship additions');
+  assert.match(activityMemory, /data-memory-session="sync%2Frecent"/,
+    'each memory change carries a stable deep-link session identifier');
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(context.memoryChangesForItem(memorySession, 'demo/decision'))),
+    {
+      entity: { name: 'demo/decision', entityType: 'decision' },
+      observations: [{ name: 'demo/decision', text: 'Use <Postgres> for durable storage' }],
+      relations: [{ from: 'demo/decision', to: 'demo/database', relationType: 'depends-on' }],
+    },
+    'memory highlighting resolves the exact item, observations, and relationships from a sync',
+  );
+  assert.match(context.sessionSummary(memorySession), /3 memory additions/,
+    'activity rows surface memory-only syncs without calling them no-op sessions');
   assert.strictEqual(
     context.modelFingerprint({ remote: { status: 'ready', lastActivityAt: 'first' } }),
     context.modelFingerprint({ remote: { status: 'ready', lastActivityAt: 'second' } }),

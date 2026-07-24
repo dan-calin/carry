@@ -1,6 +1,6 @@
 [package]
 name = "carry-desktop"
-version = "0.2.4"
+version = "0.3.0"
 description = "Native desktop shell for Carry"
 authors = ["Carry contributors"]
 edition = "2021"

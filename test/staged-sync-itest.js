@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const engine = require('../lib/sync-engine');
+const privateState = require('../lib/private-state');
 
 const LOCAL_ID = 'device-local';
 const PEER_ID = 'device-peer';
@@ -23,7 +24,10 @@ function write(root, rel, value) {
 }
 
 function stagedFile(root, exchangeId, name, value) {
-  return write(root, `.carry/incoming/${exchangeId}/${name}`, value);
+  const file = privateState.projectFile(root, 'incoming', exchangeId, name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, value);
+  return file;
 }
 
 function userFiles(root) {
