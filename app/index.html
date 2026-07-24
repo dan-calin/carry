@@ -62,6 +62,10 @@
           <span class="fluent-icon" aria-hidden="true">&#xE81C;</span><span>Activity</span>
           <span class="nav-count" id="activity-count" hidden>0</span>
         </button>
+        <button class="nav-item" type="button" data-view="memory" aria-label="Memory" title="Memory">
+          <span class="fluent-icon" aria-hidden="true">&#xE8F1;</span><span>Memory</span>
+          <span class="nav-count" id="memory-count" hidden>0</span>
+        </button>
         <button class="nav-item" type="button" data-view="checkpoints" aria-label="Checkpoints" title="Checkpoints">
           <span class="fluent-icon" aria-hidden="true">&#xE823;</span><span>Checkpoints</span>
           <span class="nav-count" id="checkpoint-count" hidden>0</span>
@@ -163,6 +167,34 @@
       <div class="modal-actions">
         <button class="button button-quiet" type="button" data-close-dialog="sync-dialog">Cancel</button>
         <button class="button button-primary" type="submit" id="sync-start-button"><span class="fluent-icon" aria-hidden="true">&#xE895;</span>Start sync</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal memory-edit-modal" id="memory-edit-dialog" aria-labelledby="memory-edit-title">
+    <form id="memory-edit-form">
+      <div class="modal-header">
+        <div>
+          <h2 id="memory-edit-title">Edit memory item</h2>
+          <p>Changes update the shared graph that coding agents read and sync.</p>
+        </div>
+        <button class="icon-button modal-close" type="button" data-close-dialog="memory-edit-dialog" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <input id="memory-original-name" type="hidden">
+      <label class="field-label" for="memory-item-name">Item name</label>
+      <input class="text-input mono" id="memory-item-name" maxlength="240" autocomplete="off" spellcheck="false" required>
+      <label class="field-label" for="memory-item-type">Type</label>
+      <input class="text-input" id="memory-item-type" maxlength="80" autocomplete="off" required>
+      <label class="field-label" for="memory-item-observations">Observations</label>
+      <textarea class="text-input memory-observations-input" id="memory-item-observations" rows="9" maxlength="64000" spellcheck="true"></textarea>
+      <p class="field-help">Use one observation per line. Keep the agent and date suffix when it explains where a fact came from.</p>
+      <div class="memory-edit-warning">
+        <span class="fluent-icon" aria-hidden="true">&#xE7BA;</span>
+        <span>Carry merges memory by union. An older observation still stored on another device can return on a later sync.</span>
+      </div>
+      <div class="modal-actions">
+        <button class="button button-quiet" type="button" data-close-dialog="memory-edit-dialog">Cancel</button>
+        <button class="button button-primary" type="submit" id="memory-save-button">Save changes</button>
       </div>
     </form>
   </dialog>

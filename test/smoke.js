@@ -9,6 +9,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const checkpoints = require('../lib/checkpoints');
 const memory = require('../lib/memoryMerge');
 const sync = require('../lib/sync');
 const fsx = require('../lib/fsx');
@@ -44,6 +45,13 @@ function ok(name, cond) {
   ok('merge unions observations on a.py', a.observations.length === 2);
   ok('merge adds relation', r.store.relations.length === 1);
   ok('merge counts addedObs=2 (b.py new + a.py merged)', r.addedObs === 2);
+  ok('merge records the exact new memory item for sync activity',
+    r.addedEntityRecords.some((item) => item.name === 'proj/b.py' && item.entityType === 'file'));
+  ok('merge records the exact new observations for sync activity',
+    r.addedObservationRecords.some((item) => item.name === 'proj/a.py' && item.observation.includes('did Y')));
+  ok('merge records the exact new relation for sync activity',
+    r.addedRelationRecords.some((item) =>
+      item.from === 'proj/a.py' && item.to === 'proj/b.py' && item.relationType === 'depends-on'));
 })();
 
 // 2. Memory merge dedupes identical observations.
@@ -209,6 +217,70 @@ if (process.platform === 'win32') (function testModernFolderPickerCompiles() {
   const compiled = originalSpawnSync(invocation.command, invocation.args, invocation.options);
   assert.strictEqual(compiled.status, 0, String(compiled.stderr || 'Native folder picker did not compile'));
   ok('modern Explorer-style folder picker compiles', true);
+})();
+
+(function testMemoryManagementAndCheckpointLinks() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'carry-memory-ui-'));
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'carry-memory-ui-state-'));
+  const previousState = process.env.CARRY_PRIVATE_STATE_DIR;
+  process.env.CARRY_PRIVATE_STATE_DIR = state;
+  try {
+    fs.mkdirSync(path.join(tmp, '.shared-memory'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.shared-memory', 'memory.json'), [
+      JSON.stringify({ type: 'entity', name: 'demo/a', entityType: 'feature', observations: ['first (codex, 2026-07-23 12:00)'] }),
+      JSON.stringify({ type: 'entity', name: 'demo/b', entityType: 'file', observations: ['second'] }),
+      JSON.stringify({ type: 'relation', from: 'demo/a', to: 'demo/b', relationType: 'uses' }),
+      '',
+    ].join('\n'));
+
+    memory.setPinned(tmp, 'demo/a', true);
+    memory.update(tmp, 'demo/a', {
+      name: 'demo/renamed',
+      entityType: 'decision',
+      observations: ['edited (codex, 2026-07-23 13:00)'],
+    });
+    let managed = memory.list(tmp);
+    const renamed = managed.items.find((item) => item.name === 'demo/renamed');
+    ok('memory management renames an item and keeps its pin', renamed && renamed.pinned);
+    ok('memory management rewrites graph links on rename',
+      renamed.relations.some((relation) => relation.from === 'demo/renamed' && relation.to === 'demo/b'));
+    ok('memory management preserves a local pre-edit backup',
+      fs.existsSync(path.join(tmp, '.shared-memory', 'memory.json.bak')));
+
+    const checkpoint = checkpoints.create(tmp, 'Before memory cleanup', { kind: 'manual' });
+    const removed = memory.remove(tmp, 'demo/b');
+    ok('deleting memory removes its graph links', removed.removedRelations === 1);
+    const preview = checkpoints.preview(tmp, checkpoint.checkpointId);
+    ok('checkpoint preview separates shared memory from project files',
+      preview.counts.total === 0 && preview.memoryCounts.restore === 1);
+    ok('checkpoint preview links the exact memory item that would return',
+      preview.memoryChanges.some((change) => change.name === 'demo/b' && change.action === 'restore'));
+
+    const incoming = {
+      entities: [{ type: 'entity', name: 'demo/imported', entityType: 'note', observations: ['arrived remotely'] }],
+      relations: [{ type: 'relation', from: 'demo/imported', to: 'demo/renamed', relationType: 'informs' }],
+    };
+    const imported = memory.mergeMemoryInto(tmp, incoming, { sourcePeerId: 'peer1234', sessionId: 'session1234' });
+    managed = memory.list(tmp);
+    ok('memory imports retain local source provenance outside the shared graph',
+      managed.items.find((item) => item.name === 'demo/imported').observations[0].provenance.peerId === 'peer1234' &&
+      managed.items.find((item) => item.name === 'demo/imported').observations[0].provenance.sessionId === 'session1234');
+    ok('memory imports return exact relation records for the session audit trail',
+      imported.addedRelationRecords.some((item) =>
+        item.from === 'demo/imported' && item.to === 'demo/renamed' && item.relationType === 'informs'));
+    memory.mergeMemoryInto(tmp, {
+      entities: [{ type: 'entity', name: '__proto__', entityType: 'note', observations: ['safe special name'] }],
+      relations: [],
+    }, { sourcePeerId: 'peer1234' });
+    ok('special memory names cannot pollute provenance metadata prototypes',
+      memory.list(tmp).items.find((item) => item.name === '__proto__').observations[0].provenance.peerId === 'peer1234' &&
+      !Object.prototype.peerId);
+  } finally {
+    if (previousState === undefined) delete process.env.CARRY_PRIVATE_STATE_DIR;
+    else process.env.CARRY_PRIVATE_STATE_DIR = previousState;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(state, { recursive: true, force: true });
+  }
 })();
 
 console.log('\n' + passed + ' checks passed.');

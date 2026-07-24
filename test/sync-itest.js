@@ -303,6 +303,15 @@ function allFiles(root) {
     const memoryB = read(b, '.shared-memory/memory.json');
     assert.ok(memoryA.includes('carry/a') && memoryA.includes('carry/b'), 'PC memory is union-merged');
     assert.ok(memoryB.includes('carry/a') && memoryB.includes('carry/b'), 'laptop memory is union-merged');
+    const latestMemorySession = engine.listSessions(a, 1)[0];
+    assert.deepStrictEqual(latestMemorySession.memory.entities,
+      [{ name: 'carry/b', entityType: 'note' }],
+      'sync activity records the exact memory item added by the peer');
+    assert.deepStrictEqual(latestMemorySession.memory.observations,
+      [{ name: 'carry/b', text: 'from B' }],
+      'sync activity records the exact observation added by the peer');
+    assert.deepStrictEqual(latestMemorySession.memory.relations, [],
+      'sync activity records an empty exact relation list when none arrived');
 
     write(a, '.shared-memory/activity.jsonl', '{"agent":"local-only"}\n');
     write(a, '.shared-memory/memory.json.bak', 'local recovery copy');
