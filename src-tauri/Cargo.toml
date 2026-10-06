@@ -16,7 +16,7 @@ name = "carry"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = { version = "=2.6.3", features = [] }
+tauri-build = { version = "=2.7.1", features = [] }
 
 [dependencies]
 fs2 = "=0.4.3"
