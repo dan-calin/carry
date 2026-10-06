@@ -58,7 +58,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.4",
+    "@tauri-apps/cli": "2.12.1",
     "wrangler": "4.112.0"
   },
   "overrides": {
